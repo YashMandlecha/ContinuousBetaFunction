@@ -128,11 +128,12 @@ class SetupBetaFunction(object):
 
     def _get(self, 
              coupling: str, 
-             volume: str, 
+             volume: str,
+             mass: str, 
              flow: str, 
              path: str
         ) -> dict[str,list[float]]:
-        fn = path + '_'.join([coupling,volume,flow]) + '.bin'
+        fn = path + '_'.join([coupling,volume,mass,flow]) + '.bin'
         with open(fn,'rb') as in_file: data = _pickle.load(in_file)
         qf = self._Q_filter(data)
         return {
@@ -219,7 +220,8 @@ class SetupBetaFunction(object):
                      data_ref, 
                      flow, 
                      volume, 
-                     coupling
+                     coupling,
+                     mass # not used
         ):
         flow_times = _numpy.array(
             [float(t) for t in self._flow_times(data_ref[flow])]
@@ -252,7 +254,7 @@ class SetupBetaFunction(object):
         return result
 
     def process_data(self, 
-                     data: dict[str,dict[str,list[str]]],
+                     data: dict[str,dict[str,dict[str,list[str]]]],
                      path: str = '',
                      get_data: any = None,
                      average_data: any = None,
@@ -278,35 +280,39 @@ class SetupBetaFunction(object):
         self.avg_data = {}
 
         for coupling in data.keys():
-            self.data[coupling], self.avg_data[coupling] = {}, {}
+            self.data[coupling],self.avg_data[coupling] = {},{}
             for volume in data[coupling].keys():
-                if verbosity >= 1: 
-                    self._start_timer()
-                    msg = 25 * '-.' + '\nbeta_b = ' + coupling.replace('p','.')
-                    msg += ', vol = ' + volume
-                    print(msg)
-                
-                flows = data[coupling][volume]
-                predata = {flow: get(coupling,volume,flow,path) for flow in flows}
-                predata_rearranged = self._rearrange(predata)
-                self.data[coupling][volume] = self._undorearrange(
-                    predata_rearranged, flows, predata
-                )
-                for f in flows:
-                    ts = self._flow_times(predata[f])
-                    self.data[coupling][volume][f]['flow_times'] = ts
-                avg_data = self._undorearrange(
-                    average(predata_rearranged, process = process), flows, predata
-                )
-                self.avg_data[coupling][volume] = {
-                    flow: self.get_g2GF_betaGF_and_Q(
-                        avg_data, predata, flow, volume, coupling
+                self.data[coupling][volume],self.avg_data[coupling][volume] = {},{}
+                for mass in data[coupling][volume]:
+                    if verbosity >= 1: 
+                        self._start_timer()
+                        msg = 25 * '-.' + '\nbeta_b = ' + coupling.replace('p','.')
+                        msg += ', vol = ' + volume
+                        msg += ', mass = ' + mass
+                        print(msg)
+                    
+                    flows = data[coupling][volume][mass]
+                    predata = {
+                        flow: get(coupling,volume,mass,flow,path) for flow in flows
+                    }
+                    predata_rearranged = self._rearrange(predata)
+                    self.data[coupling][volume][mass] = self._undorearrange(
+                        predata_rearranged,flows,predata
                     )
-                    for flow in flows
-                }
+                    for f in flows:
+                        ts = self._flow_times(predata[f])
+                        self.data[coupling][volume][mass][f]['flow_times'] = ts
+                    avg_data = self._undorearrange(
+                        average(predata_rearranged,process=process),flows,predata
+                    )
+                    self.avg_data[coupling][volume][mass] = {
+                        flow: self.get_g2GF_betaGF_and_Q(
+                            avg_data,predata,flow,volume,coupling,mass
+                        ) for flow in flows
+                    }
 
-                if verbosity >= 1:
-                    print('dt =', self._stop_timer(), '(secs)\n' + 25 * '-.')
+                    if verbosity >= 1:
+                        print('dt =', self._stop_timer(), '(secs)\n' + 25 * '-.')
 
     def _start_timer(self): self._ti = time.time()
 
@@ -350,17 +356,4 @@ class SetupBetaFunction(object):
             case 'iv': return self.iv_fits
             case _: BetaFunctionException(info + ' is not a valid option.')
 
-if __name__ == '__main__':
-    path = '../../examples/nf8/data/'
-    betafn = SetupBetaFunction(nf = 8)
-    vols = ['l' + 'l'.join([l,l,l]) + 't' + l for l in ['24','30','32','36','40']]
-    cplings = [
-        '8p80', '8p85', '8p90', '9p00', '9p10', '9p20', 
-        '9p30', '9p40', '9p60', '9p90', '10p4', '11p0'
-    ]
-    flows = ['C0p0','C0p042','C0p083','C0p104','C0p125']
-    data = {
-        cpling:{vol:[flow for flow in flows] for vol in vols} 
-        for cpling in cplings
-    }
-    betafn.process_data(data, path = path)
+if __name__ == '__main__': pass
