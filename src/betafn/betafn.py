@@ -27,7 +27,7 @@ class BetaFunction(SetupBetaFunction):
     def __init__(self,
                  nc: float | int = 3., 
                  nf: float | int = None, 
-                 gauge_action: str = None,
+                 gauge_action: str = 's',
                  logfn: str = None
                  ): 
         super().__init__(
@@ -48,17 +48,18 @@ class BetaFunction(SetupBetaFunction):
         return {x: {f: {o: {} for o in self.os} for f in fs} for x in xtrp}
     
     def _gather_iv_info(self, c, xtrp, mnt, mxt):
+        mass = '0p00' # Must be chiral
         vs = self.avg_data[c].keys()
         fs = list(set(
             f for v in vs 
-            for f in self.avg_data[c][v].keys()
+            for f in self.avg_data[c][v][mass].keys()
         ))
         ts = list(set(
             t for v in vs 
             for f in fs 
             for x in xtrp
             for o in self.os
-            for t in self.avg_data[c][v][f]['_'.join([x,o])].keys()
+            for t in self.avg_data[c][v][mass][f]['_'.join([x,o])].keys()
             if mnt <= float(t) <= mxt
         ))
         ts.sort(key = (lambda x: float(x)))
@@ -71,11 +72,12 @@ class BetaFunction(SetupBetaFunction):
         return (vs, fs, xfot)
     
     def get_fv_data(self, c, f, x, o, t, vs):
+        mass = '0p00' # Must be chiral
         xo = '_'.join([x,o])
         data = {
             'x': [1./self._vol(v) for v in vs if v not in self._iv_exclude[c]],
             'y': [
-                    self.avg_data[c][v][f][xo][t] for v in vs
+                    self.avg_data[c][v][mass][f][xo][t] for v in vs
                     if v not in self._iv_exclude[c]
                 ]    
         }
