@@ -36,17 +36,66 @@ class BetaFunction(SetupBetaFunction):
             gauge_action = gauge_action,
             logfn = logfn
         )
+        self.ch_fits = None
         self.iv_fits = None
         self.ntrp_fits = None
         self.cnt_fits = None
+
+        self._iv_thin = None
 
         self.optimizer = scipy_least_squares.SciPyLeastSquares()
 
         if logfn is not None: warnings.showwarning = self.log
 
-    def _new_empty_iv_fits_entry(self, fs, xtrp):
+    def _new_empty_ch_fits_entry(self, fs, xtrp):
         return {x: {f: {o: {} for o in self.os} for f in fs} for x in xtrp}
+
+    def _mass(self, mass): return float(mass.replace('p','.'))
+
+    def _gather_ch_info(self,c,v,xtrp,mnt,mxt):
+        ms = [m for m in self.avg_data[c][v].keys() if m != '0p00']
+        fs = list(set(
+            f for m in ms
+            for f in self.avg_data[c][v][m].keys()
+        ))
+        ts = list(set(
+            t for m in ms
+            for f in fs 
+            for x in xtrp
+            for o in self.os
+            for t in self.avg_data[c][v][m][f]['_'.join([x,o])].keys()
+            if mnt <= float(t) <= mxt
+        ))
+        ts.sort(key = (lambda x: float(x)))
+        xfot = [
+            (x,f,o,t) for x in xtrp 
+            for f in fs 
+            for o in self.os 
+            for t in ts[::self._iv_thin]
+        ]
+        return (ms, fs, xfot)
     
+    def get_ch_data(self, c, l, f, x, o, t, ms):
+        xo = '_'.join([x,o])
+        data = {
+            'x': [
+                self._mass(m) for m in ms 
+                if (m not in self._ch_exclude[c][l]) and (m != '0p00')
+            ],
+            'y': [
+                self.avg_data[c][l][m][f][xo][t] for m in ms
+                if (m not in self._ch_exclude[c][l]) and (m != '0p00')
+            ]    
+        }
+        return data
+
+    def _new_empty_iv_fits_entry(self, fs, xtrp):
+        return self._new_empty_ch_fits_entry(fs,xtrp)
+    
+    def _vol(self, vol):
+        dims = vol.replace('t','l').split('l')[1:]
+        return _numpy.prod([*map(float, dims)])
+
     def _gather_iv_info(self, c, xtrp, mnt, mxt):
         mass = '0p00' # Must be chiral
         vs = self.avg_data[c].keys()
@@ -70,16 +119,16 @@ class BetaFunction(SetupBetaFunction):
             for t in ts[::self._iv_thin]
         ]
         return (vs, fs, xfot)
-    
+
     def get_fv_data(self, c, f, x, o, t, vs):
         mass = '0p00' # Must be chiral
         xo = '_'.join([x,o])
         data = {
             'x': [1./self._vol(v) for v in vs if v not in self._iv_exclude[c]],
             'y': [
-                    self.avg_data[c][v][mass][f][xo][t] for v in vs
-                    if v not in self._iv_exclude[c]
-                ]    
+                self.avg_data[c][v][mass][f][xo][t] for v in vs
+                if v not in self._iv_exclude[c]
+            ]    
         }
         return data
 
@@ -100,21 +149,117 @@ class BetaFunction(SetupBetaFunction):
         for v in list(pwrst): result.append(list(v))
         return result
 
-    def _vol(self, vol):
-        dims = vol.replace('t','l').split('l')[1:]
-        return _numpy.prod([*map(float, dims)])
+    def ch_xtrp(
+            self,
+            mnt: float = None, 
+            mxt: float = None,
+            exclude: dict[str,list[str]] = None,
+            fcn: Callable[[any,dict[str,any]],any] = None, 
+            prior: dict[str,any] = None,
+            p0: dict[str,any] = None,
+            xtrp: list[str] = ['g2', 'beta'],
+            v: int = 1,
+            thin: int = 1,
+            postprocess: bool = True
+        ):
+        if not hasattr(self, 'avg_data'): 
+            BetaFunctionException('Must grab fv data before chiral extrapolation')
+        if mnt is None: mnt = self._min_fv_flt
+        if mxt is None: mxt = self._max_fv_flt
+        if fcn is None: self.ch_fcn = self._ch_xtrp_fcn
 
-    def iv_xtrp(self, 
-                mnt: float = None, 
-                mxt: float = None, 
-                exclude: dict[str,list[str]] = None,
-                fcn: Callable[[any,dict[str,any]],any] = None, 
-                prior: dict[str,any] = None,
-                p0: dict[str,any] = None,
-                xtrp: list[str] = ['g2', 'beta'],
-                model_average: bool = False,
-                v: int = 1,
-                thin: int = 1,
+        if prior is None: pass
+        else: prior = {
+                key: [val] if not hasattr(val,'__len__') else val 
+                for key,val in prior.items()
+            }
+
+        if p0 is None: p0 = {'k1(t;beta,L)': [0.], 'k2(t;beta,L)': [0.]}
+        else: p0 = {
+                key: [val] if not hasattr(val,'__len__') else val 
+                for key,val in p0.items()
+            }
+        nprm = self._nprm(prior, p0)
+
+        if self.ch_fits is not None:
+            del self.ch_fits
+            _gc.collect()
+        self.ch_fits = {}
+        self.ch_qof = {}
+
+        self._iv_thin = thin
+
+        if exclude is None: 
+            self._ch_exclude = {
+                c: {l: [] for l in self.avg_data[c]} for c in self.avg_data.keys()
+            }
+        else: self._ch_exclude = exclude
+        cs = list(self.data.keys())
+
+        if v >= 1: print('Chiral extrapolation' + '\n' + 50 * '~' )
+
+        for c in cs:
+            self.ch_fits[c] = {}
+            self.ch_qof[c] = {}
+            for l in self.avg_data[c].keys():
+                (ms, fs, xfot) = self._gather_ch_info(c,l,xtrp,mnt,mxt)
+                self.ch_fits[c][l] = self._new_empty_ch_fits_entry(fs,xtrp)
+                self.ch_qof[c][l] = self._new_empty_ch_fits_entry(fs,xtrp)
+                if len(ms) > 1:
+                    if postprocess:
+                        self.avg_data[c][l]['0p00'] = {
+                            f: {'_'.join([x,o]): {} for x in xtrp for o in self.os} 
+                            for f in fs
+                        }
+                        for f in fs: 
+                            self.avg_data[c][l]['0p00'][f]['flow_times'] = []
+                    if v >= 1: self._start_timer()
+                    for x,f,o,t in _tqdm(xfot):
+                        xo = '_'.join([x,o])
+                        try:
+                            if v >= 2: print(c,l,f,x,o,t)
+                            data = self.get_ch_data(c,l,f,x,o,t,ms)
+                            fit = fitter.SwissFit(
+                                data = data,
+                                prior = prior,
+                                p0 = p0,
+                                fit_fcn = self.ch_fcn
+                            )(self.optimizer)
+                            self.ch_fits[c][l][x][f][o][t] = fit.p
+                            self.ch_qof[c][l][x][f][o][t] = {
+                                'chi2': fit.chi2, 'dof': fit.dof, 
+                                'p-value': fit.Q, 'logml': fit.logml
+                            }
+                            if postprocess:
+                                self.avg_data[c][l]['0p00'][f][xo][t] = self.ch_fcn(
+                                    0.0,self.ch_fits[c][l][x][f][o][t]
+                                )
+                            if (postprocess) and (o == self.os[0]) and (x == xtrp[0]):
+                                self.avg_data[c][l]['0p00'][f]['flow_times'].append(t)
+                            if v >= 2: print(self.ch_fits[c][x][f][o][t])
+                        except KeyError as err:
+                            s1,s2 = 'ERROR: ' + ' '.join([c,x,f,o,t]), repr(err)
+                            self.log.write(s1,s2)
+                            pass
+                    if v >= 1:
+                        msg = 'Finished beta_b = ' + c.replace('p','.') 
+                        msg += ', L^{Nd-1}xT = ' 
+                        msg += str(l[1:].replace('l','x').replace('t','x'))
+                        msg += ' in ' + str(self._stop_timer()) + ' secs'
+                        print(msg)
+
+    def iv_xtrp(
+            self, 
+            mnt: float = None, 
+            mxt: float = None, 
+            exclude: dict[str,list[str]] = None,
+            fcn: Callable[[any,dict[str,any]],any] = None, 
+            prior: dict[str,any] = None,
+            p0: dict[str,any] = None,
+            xtrp: list[str] = ['g2', 'beta'],
+            model_average: bool = False,
+            v: int = 1,
+            thin: int = 1,
         ):
         # Setup
         if not hasattr(self, 'avg_data'): 
@@ -122,15 +267,17 @@ class BetaFunction(SetupBetaFunction):
         if mnt is None: mnt = self._min_fv_flt
         if mxt is None: mxt = self._max_fv_flt
         if fcn is None: self.iv_fcn = self._iv_xtrp_fcn
+
         if prior is None: pass
         else: prior = {
-            key: [val] if not hasattr(val,'__len__') else val 
-            for key,val in prior.items()
+                key: [val] if not hasattr(val,'__len__') else val 
+                for key,val in prior.items()
             }
+        
         if p0 is None: p0 = {'k1(t;beta)': [0.], 'k2(t;beta)': [0.]}
         else: p0 = {
-            key: [val] if not hasattr(val,'__len__') else val 
-            for key,val in p0.items()
+                key: [val] if not hasattr(val,'__len__') else val 
+                for key,val in p0.items()
             }
         nprm = self._nprm(prior, p0)
 
@@ -141,18 +288,24 @@ class BetaFunction(SetupBetaFunction):
         self.iv_qof = {}
         
         if model_average: d = {}
-        self._iv_thin = thin
+
+        if self._iv_thin is not None:
+            if self._iv_thin != thin:
+                BetaFunctionException('thin already set and not equal to input')
+        else: self._iv_thin = thin
+        
         if exclude is None:
             self._iv_exclude = {c: [] for c in self.avg_data.keys()}
         else: self._iv_exclude = exclude
         cs = list(self.data.keys())
 
-        # Infinite volume extrapolation
         if v >= 1: 
             msg = 'Infinite volume extrapolation'
             if model_average: msg += '... this may take a while...'
             msg += '\n' + 50 * '~' 
             print(msg)
+
+        # Infinite volume extrapolation
         for c in cs:
             if v >= 1: self._start_timer()
             (vs, fs, xfot) = self._gather_iv_info(c,xtrp,mnt,mxt)

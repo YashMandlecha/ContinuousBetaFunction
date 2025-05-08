@@ -84,12 +84,13 @@ class PerturbativeBetaFunction(object):
 
 # Main class for setting calculation of beta-function up
 class SetupBetaFunction(object):
-    def __init__(self,
-                 nc: float | int = 3., 
-                 nf: float | int = None, 
-                 gauge_action: str = None,
-                 logfn: str = None
-                 ):
+    def __init__(
+            self,
+            nc: float | int = 3., 
+            nf: float | int = None, 
+            gauge_action: str = 's', # s = sym, w = wils, c = clov, h = hisq
+            logfn: str = None
+        ):
         if nf is None: raise BetaFunctionException('must specify nf')
         self.nf, self.nc = nf, nc
         
@@ -109,6 +110,8 @@ class SetupBetaFunction(object):
         self.log = BetaFunctionLog(logfn)
         if logfn is not None: warnings.showwarning = self.log
 
+        self.gauge_action = gauge_action
+
     def _dxdlogt(self, x: any, t: any) -> any: # -dx/dlogt (5-point)
         x, t = _numpy.array(x), _numpy.array(t)
         dx = -x[4:] + 8.*x[3:-1] - 8.*x[1:-3] + x[:-4]
@@ -117,12 +120,13 @@ class SetupBetaFunction(object):
 
     def _Q_filter(self, D):
         Q_in_keys = 'Q' in D.keys()
-        if Q_in_keys: 
+        not_inf = not (_numpy.isinf(self._min_Q) and _numpy.isinf(self._max_Q))
+        if (Q_in_keys and not_inf): 
             Q = D['Q'][-1]
             filter = lambda d: [
                 da for cf,da in enumerate(d) 
                 if self._min_Q <= Q[cf] <= self._max_Q
-                ]
+            ]
             return filter
         else: return lambda d: d
 
@@ -188,31 +192,48 @@ class SetupBetaFunction(object):
     def delta(self,
                flow_times: any,
                volume: str,
-               coupling: float,
+               flow: str,
                observable: str
-        ) -> any: # arXiv:1208.1051
+        ) -> any:
         match self._correction:
-            case 'finite-volume':
+            case 'finite-volume': # arXiv:1208.1051
                 dims = volume.replace('t','l').split('l')[1:]
-                
                 da = -64.*_numpy.pi*_numpy.pi/3.
                 de = 1.
-                
                 for dim in [*map(float, dims)]:
                     r = dim*dim/flow_times
                     da /= _numpy.sqrt(r)
                     de *= 1. + 2.*_numpy.exp(-0.125*r) + 2.*_numpy.exp(-0.5*r)
-
                 return da + de - 1.
+            case 'tree-level-normalization' | 'tln': # arXiv:1406.0827
+                flow_translation = {
+                    'symanzik': 's',
+                    'C0p0': 'p',
+                    'wilson': 'p',
+                    'C13': 'a'
+                }
+                if flow not in list(flow_translation.keys()):
+                    raise BetaFunctionException(flow+' not known flow for tln')
+                dpath = self._tln_path + '/'
+                dpath += self.gauge_action + flow_translation[flow] + observable
+                dpath += volume + '.tln'
+                t,d = [],[]
+                with open(dpath,'r') as in_file:
+                    for line in in_file.readlines():
+                        tv,dv,_,_ = [*map(float,line.split())]
+                        t.append(tv)
+                        d.append(dv)
+                spline = _gvar.cspline.CSpline(t,d)
+                return _numpy.array([spline(t) for t in flow_times])-1.
             case _: return _numpy.array([0. for _ in flow_times])
 
     def _norm(self, 
-              flow_times: any, 
-              volume: float, 
-              coupling: float,
+              flow_times: any,
+              volume: str,
+              flow: str, 
               observable: str
         ) -> any:
-        Ctlb = 1. + self.delta(flow_times, volume, coupling, observable)
+        Ctlb = 1. + self.delta(flow_times, volume, flow, observable)
         return self._coupling_norm*flow_times*flow_times/Ctlb
 
     def get_g2GF_betaGF_and_Q(self, 
@@ -230,8 +251,8 @@ class SetupBetaFunction(object):
         # Running coupling (g^2_O = norm * t^2<E_O(t)> / (1 + delta(L,beta,O)))
         result = {
             '_'.join(['g2',o[-1]]): 
-            self._norm(flow_times, volume, coupling, o[-1])*data[flow][o]    
-            for o in data[flow].keys() if 'E' in o
+            self._norm(flow_times, volume, flow, o[-1])*data[flow][o]    
+            for o in data[flow].keys() if ('E' in o) and (o[-1] in self.os)
         }
 
         # Beta-function (beta = -t dg^2 / dt = -dg^2 / dlogt)
@@ -253,18 +274,20 @@ class SetupBetaFunction(object):
                 }
         return result
 
-    def process_data(self, 
-                     data: dict[str,dict[str,dict[str,list[str]]]],
-                     path: str = '',
-                     get_data: any = None,
-                     average_data: any = None,
-                     preprocess_data: any = None,
-                     correction: str = 'finite-volume',
-                     mnt: float = 0.,
-                     mxt: float = _numpy.inf, 
-                     mnQ: float = -_numpy.inf,
-                     mxQ: float = _numpy.inf,
-                     verbosity: int = 0
+    def process_data(
+            self, 
+            data: dict[str,dict[str,dict[str,list[str]]]],
+            path: str = '',
+            get_data: any = None,
+            average_data: any = None,
+            preprocess_data: any = None,
+            correction: str = 'finite-volume',
+            tree_level_normalization_data_path: str = './',
+            mnt: float = 0.,
+            mxt: float = _numpy.inf, 
+            mnQ: float = -_numpy.inf,
+            mxQ: float = _numpy.inf,
+            verbosity: int = 0,
         ):
         average = self._average if average_data is None else average_data
         get = self._get if get_data is None else get_data
@@ -272,6 +295,11 @@ class SetupBetaFunction(object):
         self._correction = correction
         self._min_fv_flt, self._max_fv_flt = mnt, mxt
         self._min_Q, self._max_Q = mnQ, mxQ
+
+        match self._correction:
+            case 'tree-level-normalization' | 'tln': 
+                self._tln_path = tree_level_normalization_data_path
+            case _: pass
 
         del self.data, self.avg_data
         _gc.collect()
@@ -320,6 +348,9 @@ class SetupBetaFunction(object):
 
     def _iv_xtrp_fcn(self, x: any, p: dict[str,any]) -> any:
         return p['k1(t;beta)'][0] + p['k2(t;beta)'][0]*x
+    
+    def _ch_xtrp_fcn(self, x: any, p: dict[str,any]) -> any:
+        return p['k1(t;beta,L)'][0] + p['k2(t;beta,L)'][0]*x
 
     def set_binsize(self, binsize: int): self._binsize = binsize
     
