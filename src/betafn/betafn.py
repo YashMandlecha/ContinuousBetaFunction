@@ -380,7 +380,8 @@ class BetaFunction(SetupBetaFunction):
             prior: dict[str,any] = None,
             p0: dict[str,any] = None,
             v: int = 1,
-            xerrors: bool = False, 
+            xerrors: bool = False,
+            fake_iv_data: bool = False,
             emp_bayes_fcn: Callable[[float,any,any],float] = None,
             eblb: float = None,
             ebub: float = None,
@@ -420,12 +421,24 @@ class BetaFunction(SetupBetaFunction):
         except AttributeError: pass
 
         iv_data = {}
-        for (_,x,f,o,t),p in self._flatten(self.iv_fits, stop = 5).items():
-            if f not in iv_data.keys(): iv_data[f] = {}
-            if o not in iv_data[f].keys(): iv_data[f][o] = {}
-            if t not in iv_data[f][o].keys(): iv_data[f][o][t] = {}
-            if x not in iv_data[f][o][t].keys(): iv_data[f][o][t][x] = [] 
-            iv_data[f][o][t][x].append(self.iv_fcn(0.,p))
+        if not fake_iv_data:
+            for (_,x,f,o,t),p in self._flatten(self.iv_fits, stop = 5).items():
+                if f not in iv_data.keys(): iv_data[f] = {}
+                if o not in iv_data[f].keys(): iv_data[f][o] = {}
+                if t not in iv_data[f][o].keys(): iv_data[f][o][t] = {}
+                if x not in iv_data[f][o][t].keys(): iv_data[f][o][t][x] = [] 
+                iv_data[f][o][t][x].append(self.iv_fcn(0.,p))
+        else:
+            self._iv_exclude = {c: [] for c in self.avg_data.keys()}
+            cs = list(self.data.keys())
+            for c in cs:
+                (vs, fs, xfot) = self._gather_iv_info(c, ['g2', 'beta'], self._min_fv_flt, self._max_fv_flt)
+                for x,f,o,t in xfot:
+                    if f not in iv_data.keys(): iv_data[f] = {}
+                    if o not in iv_data[f].keys(): iv_data[f][o] = {}
+                    if t not in iv_data[f][o].keys(): iv_data[f][o][t] = {}
+                    if x not in iv_data[f][o][t].keys(): iv_data[f][o][t][x] = []
+                    iv_data[f][o][t][x].append(self.get_fv_data(c, f, x, o, t, vs)['y'][-1])
 
         if v >= 1: print('Intermediate interpolation\n' + 50 * '~')
         self.ntrp_fits,self.ntrp_qof,self.ntrp_nf = {},{},{}
