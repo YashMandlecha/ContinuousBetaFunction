@@ -236,6 +236,7 @@ class SetupBetaFunction(object):
         Ctlb = 1. + self.delta(flow_times, volume, flow, observable)
         return self._coupling_norm*flow_times*flow_times/Ctlb
 
+    
     def get_g2GF_betaGF_and_Q(self, 
                      data, 
                      data_ref, 
@@ -248,11 +249,18 @@ class SetupBetaFunction(object):
             [float(t) for t in self._flow_times(data_ref[flow])]
         )
 
+        # Combining observables
+        pdata = data
+        if self.combine is not None: # TODO: fix issue w/ having multiple coupled entries in "combine"
+            for o in self.combine.keys():
+                pdata[flow]['E'+o] = sum(
+                    self.combine[o][oo]*_numpy.array(pdata[flow]['E'+oo]) for oo in self.combine[o].keys())
+            
         # Running coupling (g^2_O = norm * t^2<E_O(t)> / (1 + delta(L,beta,O)))
         result = {
             '_'.join(['g2',o[-1]]): 
-            self._norm(flow_times, volume, flow, o[-1])*data[flow][o]    
-            for o in data[flow].keys() if ('E' in o) and (o[-1] in self.os)
+            self._norm(flow_times, volume, flow, o[-1])*pdata[flow][o]    
+            for o in pdata[flow].keys() if ('E' in o) and (o[-1] in self.os)
         }
 
         # Beta-function (beta = -t dg^2 / dt = -dg^2 / dlogt)
@@ -262,7 +270,7 @@ class SetupBetaFunction(object):
             result[o] = result[o][2:-2]
 
         # Topological charge, flow times, return
-        result['Q'] = data[flow]['Q'][2:-2]
+        result['Q'] = pdata[flow]['Q'][2:-2]
         result['flow_times'] = [str(t) for t in flow_times][2:-2]
 
         # Convert array into dictionary & return
@@ -283,6 +291,7 @@ class SetupBetaFunction(object):
             preprocess_data: any = None,
             correction: str = 'finite-volume',
             tree_level_normalization_data_path: str = './',
+            combine: any = None,
             mnt: float = 0.,
             mxt: float = _numpy.inf, 
             mnQ: float = -_numpy.inf,
@@ -306,6 +315,8 @@ class SetupBetaFunction(object):
 
         self.data = {}
         self.avg_data = {}
+
+        self.combine = combine
 
         for coupling in data.keys():
             self.data[coupling],self.avg_data[coupling] = {},{}
@@ -338,7 +349,6 @@ class SetupBetaFunction(object):
                             avg_data,predata,flow,volume,coupling,mass
                         ) for flow in flows
                     }
-
                     if verbosity >= 1:
                         print('dt =', self._stop_timer(), '(secs)\n' + 25 * '-.')
 
