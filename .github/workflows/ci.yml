@@ -49,12 +49,14 @@ jobs:
             -q
         env:
           NUMBA_CACHE_DIR: ~/.cache/numba
+          PYTHONPYCACHEPREFIX: ~/.cache/pycache
 
       - name: Run integration tests
         run: |
           pytest -m integration -q
         env:
           NUMBA_CACHE_DIR: ~/.cache/numba
+          PYTHONPYCACHEPREFIX: ~/.cache/pycache
 
       - name: Upload coverage report
         if: matrix.python-version == '3.12'
@@ -95,3 +97,4 @@ jobs:
           pytest -m slow -v
         env:
           NUMBA_CACHE_DIR: ~/.cache/numba
+          PYTHONPYCACHEPREFIX: ~/.cache/pycache

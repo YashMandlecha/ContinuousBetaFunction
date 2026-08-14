@@ -1,0 +1,32 @@
+# Python bytecode — keep out of source tree entirely
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# pytest / coverage artifacts
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Distribution / build
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Editor / OS
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
