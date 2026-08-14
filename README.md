@@ -2,18 +2,18 @@
 
 Python analysis code for extracting a continuous renormalization group beta-function from gradient-flow lattice data.
 
-Example under `examples/nf12` (based on [https://journals.aps.org/prd/abstract/10.1103/PhysRevD.109.114507](Phys. Rev. D 109, 114507))
+Example under `examples/nf12` (based on [Phys. Rev. D 109, 114507](https://journals.aps.org/prd/abstract/10.1103/PhysRevD.109.114507))
 
 References:
-- [https://doi.org/10.1051/epjconf/201817508027](EPJ Web of Conferences 175, 08027 (2018))
-- [https://journals.aps.org/prd/abstract/10.1103/PhysRevD.101.034514](Phys. Rev. D 101, 034514)
-- [https://pos.sissa.it/363/094](PoS(LATTICE2019)094)
-- [https://pos.sissa.it/396/321](PoS(LATTICE2021)321)
+- [EPJ Web of Conferences 175, 08027 (2018)](https://doi.org/10.1051/epjconf/201817508027)
+- [Phys. Rev. D 101, 034514](https://journals.aps.org/prd/abstract/10.1103/PhysRevD.101.034514)
+- [PoS (LATTICE2019) 094](https://pos.sissa.it/363/094)
+- [PoS (LATTICE2021) 321](https://pos.sissa.it/396/321)
 - [https://pos.sissa.it/430/043](PoSLATTICE2022(2023)043)
-- [https://journals.aps.org/prd/abstract/10.1103/PhysRevD.107.114504](Phys. Rev. D 107, 114504)
-- [https://journals.aps.org/prd/abstract/10.1103/PhysRevD.108.L071503](Phys. Rev. D 108, L071503)
-- [https://journals.aps.org/prd/abstract/10.1103/PhysRevD.108.014502](Phys. Rev. D 108, 014502)
-- [https://journals.aps.org/prd/abstract/10.1103/PhysRevD.109.114507](Phys. Rev. D 109, 114507)
+- [Phys. Rev. D 107, 114504](https://journals.aps.org/prd/abstract/10.1103/PhysRevD.107.114504)
+- [Phys. Rev. D 108, L071503](https://journals.aps.org/prd/abstract/10.1103/PhysRevD.108.L071503)
+- [Phys. Rev. D 108, 014502](https://journals.aps.org/prd/abstract/10.1103/PhysRevD.108.014502)
+- [Phys. Rev. D 109, 114507](https://journals.aps.org/prd/abstract/10.1103/PhysRevD.109.114507)
 
 ## Analysis Workflow
 
