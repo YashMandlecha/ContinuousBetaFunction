@@ -1,4 +1,4 @@
-"""Declarative analysis configuration and result containers."""
+"""Declarative analysis configuration, interpolation specs, and result containers."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -8,7 +8,6 @@ import numpy as _numpy
 import gvar as _gvar
 
 from .exceptions import BetaFunctionException
-from .fitting import FitInput, polynomial_interpolation
 
 
 @dataclass(frozen=True)
@@ -22,8 +21,33 @@ class InterpolationSpec:
 
     @classmethod
     def polynomial(cls, order: int, width: float = 10.0, xerrors: bool = False) -> "InterpolationSpec":
+        from ..fitting.families import polynomial_interpolation  # lazy — avoids circular import
         fcn, prior, p0 = polynomial_interpolation(order, width=width)
         return cls(fcn=fcn, prior=prior, p0=p0, xerrors=xerrors)
+
+    @classmethod
+    def perturbative(
+        cls,
+        nf: float | int,
+        nc: float | int = 3,
+        loops: int = 2,
+        correction_order: int = 2,
+        free_intercept: bool = False,
+        intercept_width: float = 0.2,
+        width: float = 5.0,
+        xerrors: bool = False,
+    ) -> "InterpolationSpec":
+        from ..fitting.families import perturbative_interpolation  # lazy — avoids circular import
+        return perturbative_interpolation(
+            nf=nf,
+            nc=nc,
+            loops=loops,
+            correction_order=correction_order,
+            free_intercept=free_intercept,
+            intercept_width=intercept_width,
+            width=width,
+            xerrors=xerrors,
+        )
 
 
 @dataclass(frozen=True)
@@ -46,7 +70,6 @@ class AnalysisConfig:
     couplings: tuple[str, ...] | None = None
     volumes: dict[str, tuple[str, ...]] | None = None
     correction: str = "finite-volume"
-    tln_path: str | None = None
     binsize: int = 1
     use_gamma_method: bool = False
     gamma_window_factor: float = 3.0
@@ -83,7 +106,6 @@ class AnalysisConfig:
             "couplings": None if self.couplings is None else list(self.couplings),
             "volumes": None if self.volumes is None else {key: list(value) for key, value in self.volumes.items()},
             "correction": self.correction,
-            "tln_path": self.tln_path,
             "binsize": self.binsize,
             "use_gamma_method": self.use_gamma_method,
             "gamma_window_factor": self.gamma_window_factor,

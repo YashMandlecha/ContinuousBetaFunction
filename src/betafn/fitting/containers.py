@@ -1,4 +1,4 @@
-"""Fit data containers, model wrappers, stage storage, and standard interpolation families."""
+"""Fit data containers, model wrappers, and stage storage."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import gvar as _gvar
 import numpy as _numpy
 
-from .exceptions import BetaFunctionException
+from ..base.exceptions import BetaFunctionException
 
 
 @dataclass
@@ -92,22 +92,3 @@ class StageStore:
             self.store("inputs", keys, fit_input)
         if domain is not None:
             self.store("domains", keys, domain)
-
-
-def polynomial_interpolation(order: int, width: float = 10.0) -> tuple[Callable, dict, dict]:
-    """Build (fcn, prior, p0) for a polynomial interpolation in g^2 of the given order.
-
-    Returns a ready-to-use triple for `iv_ntrp` or `InterpolationSpec`, avoiding
-    hand-written boilerplate for the most common interpolation family.
-    """
-    if order < 1:
-        raise BetaFunctionException("Polynomial interpolation order must be at least 1.")
-
-    names = [f"c{power}" for power in range(order + 1)]
-
-    def fcn(x, p):
-        return sum(p[name][0] * x**power for power, name in enumerate(names))
-
-    prior = {name: [_gvar.gvar(0.0, width)] for name in names}
-    p0 = {name: 0.0 for name in names}
-    return fcn, prior, p0

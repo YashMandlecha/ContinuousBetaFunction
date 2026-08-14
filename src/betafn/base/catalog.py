@@ -29,7 +29,6 @@ class FlowWindow:
 @dataclass(frozen=True)
 class ProcessConfig:
     correction: str = "finite-volume"
-    tree_level_normalization_data_path: str = "./"
     combine: object = None  # Mapping[str, Mapping[str, float]] | None
 
 
@@ -42,12 +41,7 @@ class ProcessHooks:
 
 @dataclass(frozen=True)
 class EnsembleKey:
-    """Physics-aware identity of one ensemble: bare coupling, volume, and mass.
-
-    Beyond acting as a dictionary key, it decodes the lattice geometry and
-    physical parameters from the string tokens so downstream code never has
-    to re-parse `"7p00"`-style labels by hand.
-    """
+    """Physics-aware identity of one ensemble: bare coupling, volume, and mass."""
 
     coupling: str
     volume: str
@@ -111,15 +105,7 @@ class EnsembleFile:
 
 @dataclass(frozen=True)
 class DatasetCatalog:
-    """Immutable, queryable inventory of ensemble data files.
-
-    Scan a directory once, then slice the catalog with `filter`, inspect it
-    with `summary`, and hand it straight to `process_data`.  Filtering
-    returns new catalogs, so exploratory dataset selection composes cleanly:
-
-        catalog = DatasetCatalog.scan("data", flows=["wilson"])
-        massless = catalog.filter(predicate=lambda e: e.key.mass_value == 0.0)
-    """
+    """Immutable, queryable inventory of ensemble data files."""
 
     FILE_PATTERN = _re.compile(
         r"^(?P<beta>[^_]+)_(?P<volume>l\d+l\d+l\d+t\d+)_(?P<mass>[^_]+)_(?P<flow>[^.]+)\.bin$"

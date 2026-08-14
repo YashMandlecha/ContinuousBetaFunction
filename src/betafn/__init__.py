@@ -1,37 +1,39 @@
 """betafn — continuous beta-function analysis toolkit."""
-from .exceptions import BetaFunctionLog, BetaFunctionException, EmptyEnsembleError
-from .catalog import FlowWindow, ProcessConfig, ProcessHooks, EnsembleKey, EnsembleFile, DatasetCatalog
+# subpackages (importable as betafn.base, betafn.fitting, etc.)
+from . import base, processing, fitting, stages
+
+# base
+from .base.exceptions import BetaFunctionLog, BetaFunctionException, EmptyEnsembleError
+from .base.catalog import FlowWindow, ProcessConfig, ProcessHooks, EnsembleKey, EnsembleFile, DatasetCatalog
+from .base.specs import InterpolationSpec, AnalysisConfig, AnalysisResult
+# physics
 from .perturbative import PerturbativeBetaFunction
-from .processing import SetupBetaFunction
-from .fitting import FitInput, FitModel, StageStore, polynomial_interpolation
-from .config import InterpolationSpec, AnalysisConfig, AnalysisResult
-from .core import BetaFunction
+# processing
+from .processing.gamma import gamma_method_covariance, gamma_method_average, integrated_autocorrelation_time
+from .processing.finite_volume import delta_finite_volume
+from .processing.tln import delta_tln
+# fitting
+from .fitting.containers import FitInput, FitModel, StageStore
+from .fitting.families import polynomial_interpolation, perturbative_interpolation
+# classes
+from .setup import SetupBetaFunction
+from .betafn import BetaFunction
 
 __all__ = [
-    # exceptions
-    "BetaFunctionLog",
-    "BetaFunctionException",
-    "EmptyEnsembleError",
-    # catalog
-    "FlowWindow",
-    "ProcessConfig",
-    "ProcessHooks",
-    "EnsembleKey",
-    "EnsembleFile",
-    "DatasetCatalog",
-    # perturbative
+    # base
+    "BetaFunctionLog", "BetaFunctionException", "EmptyEnsembleError",
+    "FlowWindow", "ProcessConfig", "ProcessHooks",
+    "EnsembleKey", "EnsembleFile", "DatasetCatalog",
+    "InterpolationSpec", "AnalysisConfig", "AnalysisResult",
+    # physics
     "PerturbativeBetaFunction",
     # processing
-    "SetupBetaFunction",
+    "gamma_method_covariance", "gamma_method_average", "integrated_autocorrelation_time",
+    "delta_finite_volume", "delta_tln",
     # fitting
-    "FitInput",
-    "FitModel",
-    "StageStore",
-    "polynomial_interpolation",
-    # config
-    "InterpolationSpec",
-    "AnalysisConfig",
-    "AnalysisResult",
-    # core
+    "FitInput", "FitModel", "StageStore",
+    "polynomial_interpolation", "perturbative_interpolation",
+    # classes
+    "SetupBetaFunction",
     "BetaFunction",
 ]

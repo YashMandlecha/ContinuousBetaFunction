@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master", "dev"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements*.txt', 'pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+
+      - name: Cache numba JIT
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/numba
+          key: ${{ runner.os }}-numba-${{ matrix.python-version }}-${{ hashFiles('src/betafn/processing/tln.py') }}
+          restore-keys: |
+            ${{ runner.os }}-numba-${{ matrix.python-version }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy gvar lsqfit numba
+          pip install pytest pytest-cov
+
+      - name: Run fast tests (no numba JIT, no slow lattice sums)
+        run: |
+          pytest -m "not slow and not integration" \
+            --cov=src/betafn --cov-report=term-missing --cov-report=xml \
+            -q
+        env:
+          NUMBA_CACHE_DIR: ~/.cache/numba
+
+      - name: Run integration tests
+        run: |
+          pytest -m integration -q
+        env:
+          NUMBA_CACHE_DIR: ~/.cache/numba
+
+      - name: Upload coverage report
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+
+  slow-tests:
+    # TLN tests exercise numba JIT and actual lattice sums.
+    # Run on push to main/master only, not on every PR, to keep CI fast.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache numba JIT
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/numba
+          key: ${{ runner.os }}-numba-slow-${{ hashFiles('src/betafn/processing/tln.py') }}
+          restore-keys: |
+            ${{ runner.os }}-numba-slow-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy gvar lsqfit numba
+          pip install pytest
+
+      - name: Run slow tests (TLN with numba JIT)
+        run: |
+          pytest -m slow -v
+        env:
+          NUMBA_CACHE_DIR: ~/.cache/numba

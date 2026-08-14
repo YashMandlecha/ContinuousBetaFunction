@@ -1,0 +1,12 @@
+[tool.pytest.ini_options]
+testpaths  = ["tests"]
+pythonpath = ["src"]
+addopts    = "-v --tb=short -q"
+markers    = [
+    "slow: marks tests that involve numba JIT compilation or large lattice sums (deselect with '-m \"not slow\"')",
+    "integration: marks end-to-end tests that exercise the full process_data pipeline",
+]
+
+[tool.coverage.run]
+source = ["src/betafn"]
+omit   = ["*/tests/*"]
