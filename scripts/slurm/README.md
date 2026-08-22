@@ -5,6 +5,13 @@ except for the intentionally omitted flow-time correlation-matrix figures.
 It uses Matplotlib's non-interactive `Agg` backend and writes every result under
 the selected output base.
 
+The submitted jobs explicitly enable the reviewed weak-coupling plot families:
+the narrow Figure-11-style integral match and the diagnostic that extends the
+intermediate PT-preserving interpolants before taking the correlated continuum
+limit. These plots are produced for fit4, fit5, and fit6. For a shorter debugging
+run they can be disabled with `--no-reviewed-weak-coupling` when invoking the
+Python runner directly.
+
 Before submission on MSU HPCC:
 
 ```bash

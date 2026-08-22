@@ -60,6 +60,12 @@ parser.add_argument('--correction', choices=('tln', 'tree-level-normalization', 
 parser.add_argument('--binsize', type=int, default=15)
 parser.add_argument('--use-gamma-method', action=argparse.BooleanOptionalAction, default=True)
 parser.add_argument('--latex', action='store_true', help='Use external LaTeX for plot text.')
+parser.add_argument(
+    '--reviewed-weak-coupling',
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help='Generate the Figure-11 matching and extended-interpolant diagnostics.',
+)
 parser.add_argument('--validate-only', action='store_true', help='Validate configuration/model construction, then exit.')
 args = parser.parse_args()
 RUN_STARTED = time.time()
@@ -103,6 +109,7 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     'binsize': args.binsize,
     'use_gamma_method': args.use_gamma_method,
     'latex': args.latex,
+    'reviewed_weak_coupling': args.reviewed_weak_coupling,
     'slurm_job_id': os.environ.get('SLURM_JOB_ID'),
     'slurm_array_task_id': os.environ.get('SLURM_ARRAY_TASK_ID'),
 }, indent=2) + '\n')
@@ -1523,6 +1530,29 @@ for window in WINDOWS:
   )
 
 
+# ## Reviewed weak-coupling diagnostics used by the fit4 reference notebooks
+
+from betafn.weak_coupling_plots import run_reviewed_weak_coupling_plots
+
+reviewed_weak_results = None
+if args.reviewed_weak_coupling:
+    reviewed_weak_results = run_reviewed_weak_coupling_plots(
+        bf=bf,
+        flow=FLOW,
+        observables=OBSERVABLES,
+        windows=WINDOWS,
+        config=config,
+        fit_id=FIT_ID,
+        fit_watermark=FIT_WATERMARK,
+        op_colors=OP_COLORS,
+        op_labels=OP_LABELS,
+        flow_times=flow_times,
+        pt_over_g4=pt_over_g4,
+        load_case=load_case,
+        save_figure=save_figure,
+    )
+
+
 # ## Scan manifest and validation summary
 
 # In[ ]:
@@ -1552,6 +1582,7 @@ print(f'{FIT_ID} validation complete:',len(present),'continuum cases')
     'model': FIT_ID,
     'model_tag': MODEL_TAG,
     'continuum_cases': len(present),
+    'reviewed_weak_coupling': args.reviewed_weak_coupling,
     'elapsed_seconds': round(time.time() - RUN_STARTED, 3),
 }, indent=2) + '\n')
 
