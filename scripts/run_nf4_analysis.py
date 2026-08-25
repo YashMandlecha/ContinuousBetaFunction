@@ -311,6 +311,319 @@ fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
 plt.close(fig)
 
 
+# ## Plot 2b — infinite-volume beta_GF versus 1/V
+
+
+# Infinite-volume extrapolation: beta_GF versus 1/V
+
+fig, axes = plt.subplots(2, 4, figsize=(18, 9))
+
+for ax, coupling in zip(axes.ravel(), COUPLINGS):
+  available_times = sorted(
+      bf.iv_fits[coupling]['beta'][FLOW][OBSERVABLES[0]],
+      key=float,
+  )
+  time = min(
+      available_times,
+      key=lambda value: abs(float(value) - CENTRAL_WINDOW[0]),
+  )
+
+  for operator in OBSERVABLES:
+      x_fit, beta_fit, beta_data = bf.infinite_volume_curve(
+          coupling,
+          FLOW,
+          operator,
+          time,
+          x='beta',
+      )
+
+      x_fit = np.asarray(x_fit, dtype=float)
+      beta_fit = np.asarray(beta_fit, dtype=object)
+      beta_data_y = np.asarray(beta_data.y, dtype=object)
+
+      color = OP_COLORS[operator]
+
+      # Finite-volume beta_GF data.
+      ax.errorbar(
+          beta_data.x,
+          gv.mean(beta_data_y),
+          yerr=gv.sdev(beta_data_y),
+          fmt='o',
+          ms=5,
+          capsize=3,
+          elinewidth=1.0,
+          color=color,
+          label=OP_LABELS[operator],
+          zorder=3,
+      )
+
+      # Infinite-volume extrapolation curve.
+      ax.plot(
+          x_fit,
+          gv.mean(beta_fit),
+          color=color,
+          lw=1.6,
+          zorder=2,
+      )
+
+      ax.fill_between(
+          x_fit,
+          gv.mean(beta_fit) - gv.sdev(beta_fit),
+          gv.mean(beta_fit) + gv.sdev(beta_fit),
+          color=color,
+          alpha=0.16,
+          linewidth=0,
+          zorder=1,
+      )
+
+      # Infinite-volume intercept at 1/V = 0.
+      beta_params = bf.iv_fits[coupling]['beta'][FLOW][operator][time]
+      beta_infinite = bf.infinite_volume.model.evaluate(
+          0.0,
+          beta_params,
+      )
+
+      ax.errorbar(
+          [0.0],
+          [gv.mean(beta_infinite)],
+          yerr=[gv.sdev(beta_infinite)],
+          fmt='s',
+          ms=6,
+          capsize=3,
+          color=color,
+          markeredgecolor='black',
+          markeredgewidth=0.4,
+          zorder=4,
+      )
+
+  ax.set_title(
+      rf'$\beta_b={beta_value(coupling):g}$, '
+      rf'$t/a^2={float(time):g}$'
+  )
+  ax.set_xlabel(r'$1/V$')
+  ax.set_ylabel(r'$\beta_{\mathrm{GF}}$')
+  ax.minorticks_on()
+  ax.grid(which='major', linestyle='-', alpha=0.35)
+  ax.grid(which='minor', linestyle='--', alpha=0.20)
+
+# Shared legend without duplicate entries.
+handles, labels = axes.ravel()[0].get_legend_handles_labels()
+unique = dict(zip(labels, handles))
+
+fig.legend(
+  unique.values(),
+  unique.keys(),
+  ncol=len(OBSERVABLES),
+  loc='upper center',
+  frameon=False,
+)
+
+fig.suptitle(
+  r'Infinite-volume extrapolation of $\beta_{\mathrm{GF}}$',
+  y=0.995,
+)
+
+fig.tight_layout(rect=(0, 0, 1, 0.95))
+
+output_base = OUTPUT_ROOT / f'infinite_volume_beta_vs_invV_{FIT_ID}'
+fig.savefig(
+  output_base.with_suffix('.png'),
+  dpi=300,
+  bbox_inches='tight',
+)
+fig.savefig(
+  output_base.with_suffix('.pdf'),
+  dpi=300,
+  bbox_inches='tight',
+)
+
+plt.show()
+plt.close(fig)
+
+
+# ## Plot 2c — infinite-volume beta_GF/g_GF^4 versus 1/V
+
+
+# Infinite-volume extrapolation:
+# beta_GF / g_GF^4 versus 1/V
+
+fig, axes = plt.subplots(2, 4, figsize=(18, 9))
+
+for ax, coupling in zip(axes.ravel(), COUPLINGS):
+  available_times = sorted(
+      bf.iv_fits[coupling]['beta'][FLOW][OBSERVABLES[0]],
+      key=float,
+  )
+  time = min(
+      available_times,
+      key=lambda value: abs(float(value) - CENTRAL_WINDOW[0]),
+  )
+
+  for operator in OBSERVABLES:
+      # Retrieve the beta_GF and g_GF^2 data used in the IV fits.
+      _, _, beta_data = bf.infinite_volume_curve(
+          coupling,
+          FLOW,
+          operator,
+          time,
+          x='beta',
+      )
+      _, _, g2_data = bf.infinite_volume_curve(
+          coupling,
+          FLOW,
+          operator,
+          time,
+          x='g2',
+      )
+
+      # Confirm that beta and g^2 use the same volumes in the same order.
+      if beta_data.labels != g2_data.labels:
+          raise RuntimeError(
+              f'Volume ordering mismatch for {coupling}, '
+              f'{operator}, t/a^2={time}'
+          )
+
+      inv_volume = np.asarray(beta_data.x, dtype=float)
+      beta_values = np.asarray(beta_data.y, dtype=object)
+      g2_values = np.asarray(g2_data.y, dtype=object)
+
+      # Since g2_values = g_GF^2, g_GF^4 = g2_values**2.
+      ratio_data = beta_values / g2_values**2
+
+      beta_params = bf.iv_fits[coupling]['beta'][FLOW][operator][time]
+      g2_params = bf.iv_fits[coupling]['g2'][FLOW][operator][time]
+
+      x_fit = np.linspace(
+          float(np.min(inv_volume)),
+          float(np.max(inv_volume)),
+          300,
+      )
+
+      beta_fit = np.asarray(
+          [
+              bf.infinite_volume.model.evaluate(x, beta_params)
+              for x in x_fit
+          ],
+          dtype=object,
+      )
+      g2_fit = np.asarray(
+          [
+              bf.infinite_volume.model.evaluate(x, g2_params)
+              for x in x_fit
+          ],
+          dtype=object,
+      )
+
+      ratio_fit = beta_fit / g2_fit**2
+      color = OP_COLORS[operator]
+
+      # Finite-volume beta_GF/g_GF^4 data.
+      ax.errorbar(
+          inv_volume,
+          gv.mean(ratio_data),
+          yerr=gv.sdev(ratio_data),
+          fmt='o',
+          ms=5,
+          capsize=3,
+          elinewidth=1.0,
+          color=color,
+          label=OP_LABELS[operator],
+          zorder=3,
+      )
+
+      # Ratio of the fitted beta_GF and g_GF^2 IV curves.
+      ax.plot(
+          x_fit,
+          gv.mean(ratio_fit),
+          color=color,
+          lw=1.6,
+          zorder=2,
+      )
+
+      ax.fill_between(
+          x_fit,
+          gv.mean(ratio_fit) - gv.sdev(ratio_fit),
+          gv.mean(ratio_fit) + gv.sdev(ratio_fit),
+          color=color,
+          alpha=0.16,
+          linewidth=0,
+          zorder=1,
+      )
+
+      # Infinite-volume ratio at 1/V = 0.
+      beta_infinite = bf.infinite_volume.model.evaluate(
+          0.0,
+          beta_params,
+      )
+      g2_infinite = bf.infinite_volume.model.evaluate(
+          0.0,
+          g2_params,
+      )
+      ratio_infinite = beta_infinite / g2_infinite**2
+
+      ax.errorbar(
+          [0.0],
+          [gv.mean(ratio_infinite)],
+          yerr=[gv.sdev(ratio_infinite)],
+          fmt='s',
+          ms=6,
+          capsize=3,
+          color=color,
+          markeredgecolor='black',
+          markeredgewidth=0.4,
+          zorder=4,
+      )
+
+  ax.set_title(
+      rf'$\beta_b={beta_value(coupling):g}$, '
+      rf'$t/a^2={float(time):g}$'
+  )
+  ax.set_xlabel(r'$1/V$')
+  ax.set_ylabel(r'$\beta_{\mathrm{GF}}/g_{\mathrm{GF}}^4$')
+  ax.minorticks_on()
+  ax.grid(which='major', linestyle='-', alpha=0.35)
+  ax.grid(which='minor', linestyle='--', alpha=0.20)
+
+# Shared legend without duplicate entries.
+handles, labels = axes.ravel()[0].get_legend_handles_labels()
+unique = dict(zip(labels, handles))
+
+fig.legend(
+  unique.values(),
+  unique.keys(),
+  ncol=len(OBSERVABLES),
+  loc='upper center',
+  frameon=False,
+)
+
+fig.suptitle(
+  r'Infinite-volume extrapolation of '
+  r'$\beta_{\mathrm{GF}}/g_{\mathrm{GF}}^4$',
+  y=0.995,
+)
+
+fig.tight_layout(rect=(0, 0, 1, 0.95))
+
+output_base = (
+  OUTPUT_ROOT
+  / f'infinite_volume_beta_over_g4_vs_invV_{FIT_ID}'
+)
+
+fig.savefig(
+  output_base.with_suffix('.png'),
+  dpi=300,
+  bbox_inches='tight',
+)
+fig.savefig(
+  output_base.with_suffix('.pdf'),
+  dpi=300,
+  bbox_inches='tight',
+)
+
+plt.show()
+plt.close(fig)
+
+
 # ## Continuum scan — diagonal and kernel-correlated
 # 
 # Each case is serialized immediately to its own range/mode folder, matching the reference scan organization and preventing all fit covariance objects from accumulating in memory.
