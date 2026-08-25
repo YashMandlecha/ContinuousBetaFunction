@@ -350,114 +350,133 @@ for window in WINDOWS:
 print(f'saved {2 * len(WINDOWS)} continuum cases')
 
 
-# ## Plot 3 — intermediate interpolation for every flow-time range
+# ## Plot 3 — interpolation curves together with the fitted IV data points
 
 # In[ ]:
 
 
+PLOT_TIME_STEP = 0.25
+PLOT_OPERATORS = OBSERVABLES
+
+
+def select_flow_times(available_times, window, step):
+    """Select available flow times nearest to a regular grid with spacing step."""
+    available_times = sorted(available_times, key=float)
+    if not available_times:
+        return []
+    targets = np.arange(window[0], window[1] + 0.5 * step, step)
+    selected = []
+    for target in targets:
+        nearest = min(available_times, key=lambda time: abs(float(time) - target))
+        if nearest not in selected:
+            selected.append(nearest)
+    return selected
+
+
 for window in WINDOWS:
-     fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(8, 6))
 
-     for operator in OBSERVABLES:
-         for time in flow_times(window):
-             x, y, data = bf.interpolation_curve(FLOW, operator, time)
-             ratio = np.asarray(y, dtype=object) / x**2
-             alpha = 0.25 + .65 * (float(time) - window[0]) / max(
-                 window[1] - window[0], 1e-12
-             )
+    for operator in PLOT_OPERATORS:
+        times = select_flow_times(flow_times(window), window, PLOT_TIME_STEP)
+        for time in times:
+            x_grid, beta_grid, data = bf.interpolation_curve(FLOW, operator, time)
+            x_grid = np.asarray(x_grid, dtype=float)
+            beta_grid = np.asarray(beta_grid, dtype=object)
+            curve_ratio = beta_grid / x_grid**2
 
-             ax.plot(
-                 x,
-                 gv.mean(ratio),
-                 color=OP_COLORS[operator],
-                 alpha=alpha,
-                 lw=1.2,
-             )
-             ax.fill_between(
-                 x,
-                 gv.mean(ratio) - gv.sdev(ratio),
-                 gv.mean(ratio) + gv.sdev(ratio),
-                 color=OP_COLORS[operator],
-                 alpha=.04,
-             )
+            data_x = np.asarray(data.x, dtype=object)
+            data_beta = np.asarray(data.y, dtype=object)
+            data_ratio = data_beta / data_x**2
 
-     xpt = np.linspace(.01, 5, 300)
-     pt_curves = (
-         (1, "-", "1-loop universal"),
-         (2, "--", "2-loop universal"),
-         (3, "-.", "3-loop gradient flow"),
-     )
-     for loops, ls, label in pt_curves:
-         ax.plot(
-             xpt,
-             pt_over_g4(xpt, loops),
-             color="gray",
-             ls=ls,
-             label=label,
-         )
+            alpha = 0.25 + 0.65 * (
+                (float(time) - window[0]) / max(window[1] - window[0], 1e-12)
+            )
+            color = OP_COLORS[operator]
 
-     # Preliminary-analysis watermark and analysis details.
-     ax.text(
-         0.50,
-         0.52,
-         r"\textbf{Preliminary}",
-         transform=ax.transAxes,
-         fontsize=42,
-         color="gray",
-         alpha=.28,
-         ha="center",
-         va="center",
-         rotation=30,
-         zorder=0,
-     )
-     ax.text(
-         0.58,
-         0.16,
-         (
-             FIT_WATERMARK
-             + "\n"
-             rf"Interpolation, $t/a^2\in[{window[0]:g},{window[1]:g}]$"
-             "\n"
-             r"TLN"
-         ),
-         transform=ax.transAxes,
-         fontsize=10.5,
-         color="gray",
-         alpha=.52,
-         ha="center",
-         va="center",
-         fontweight="bold",
-     )
+            ax.plot(x_grid, gv.mean(curve_ratio), color=color, alpha=alpha, lw=1.5)
+            ax.fill_between(
+                x_grid,
+                gv.mean(curve_ratio) - gv.sdev(curve_ratio),
+                gv.mean(curve_ratio) + gv.sdev(curve_ratio),
+                color=color,
+                alpha=0.08,
+                linewidth=0,
+            )
+            ax.errorbar(
+                gv.mean(data_x),
+                gv.mean(data_ratio),
+                xerr=gv.sdev(data_x),
+                yerr=gv.sdev(data_ratio),
+                fmt="o",
+                ms=4.5,
+                capsize=2.5,
+                elinewidth=0.9,
+                color=color,
+                alpha=alpha,
+                markeredgecolor="black",
+                markeredgewidth=0.35,
+                linestyle="none",
+                zorder=3,
+            )
 
-     op_handles = [
-         Line2D(
-             [0],
-             [0],
-             color=OP_COLORS[operator],
-             label=OP_LABELS[operator],
-         )
-         for operator in OBSERVABLES
-     ]
-     handles, labels = ax.get_legend_handles_labels()
-     ax.legend(
-         op_handles + handles,
-         [handle.get_label() for handle in op_handles] + labels,
-         ncol=2,
-         frameon=False,
-     )
+    x_pt = np.linspace(0.01, 5.0, 300)
+    pt_handles = []
+    for loops, linestyle, label in (
+        (1, "-", "1-loop universal"),
+        (2, "--", "2-loop universal"),
+        (3, "-.", "3-loop gradient flow"),
+    ):
+        line, = ax.plot(
+            x_pt,
+            pt_over_g4(x_pt, loops),
+            color="gray",
+            linestyle=linestyle,
+            lw=1.4,
+            alpha=0.7,
+            label=label,
+        )
+        pt_handles.append(line)
 
-     ax.set(
-         xlim=(0, 5),
-         xlabel=r"$g^2_{GF}$",
-         ylabel=r"$\beta_{GF}/g_{GF}^4$",
-       #  title=rf"Interpolation, $t/a^2\in[{window[0]:g},{window[1]:g}]$",
-     )
-
-     save_figure(
-         fig,
-         window,
-         f"interpolation_beta_over_g4_{FIT_ID}",
-     )
+    operator_handles = [
+        Line2D(
+            [0], [0], color=OP_COLORS[operator], lw=1.5, marker="o",
+            markersize=5, markeredgecolor="black", markeredgewidth=0.35,
+            label=OP_LABELS[operator],
+        )
+        for operator in PLOT_OPERATORS
+    ]
+    ax.legend(handles=operator_handles + pt_handles, ncol=2, frameon=False)
+    ax.set(
+        xlim=(0, 5),
+        xlabel=r"$g^2_{GF}$",
+        ylabel=r"$\beta_{GF}/g_{GF}^4$",
+    )
+    ax.minorticks_on()
+    ax.grid(which="major", linestyle="-", alpha=0.35)
+    ax.grid(which="minor", linestyle="--", alpha=0.20)
+    ax.text(
+        0.50, 0.52, r"\textbf{Preliminary}", transform=ax.transAxes,
+        fontsize=42, color="gray", alpha=0.28, ha="center", va="center",
+        rotation=30, zorder=0,
+    )
+    ax.text(
+        0.58,
+        0.15,
+        FIT_WATERMARK + "\n"
+        + "Interpolation with IV data, "
+        + rf"$t/a^2\in[{window[0]:g},{window[1]:g}]$" + "\n"
+        + rf"$\Delta(t/a^2)\simeq {PLOT_TIME_STEP:g}$" + "\n"
+        + r"TLN",
+        transform=ax.transAxes,
+        fontsize=10.5,
+        color="gray",
+        alpha=0.52,
+        ha="center",
+        va="center",
+        fontweight="bold",
+    )
+    fig.tight_layout()
+    save_figure(fig, window, f"interpolation_beta_over_g4_{FIT_ID}_with_data")
 
 
 # ## Plot 4 — interpolation quality for every flow-time range

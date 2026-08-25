@@ -253,26 +253,65 @@ for window in WINDOWS:
     gc.collect()
 
 print(f'saved {2 * len(WINDOWS)} continuum cases')'''),
-md('## Plot 3 — intermediate interpolation for every flow-time range'),
-code(r'''for window in WINDOWS:
+md('## Plot 3 — interpolation curves together with the fitted IV data points'),
+code(r'''PLOT_TIME_STEP = 0.25
+PLOT_OPERATORS = OBSERVABLES
+
+def select_flow_times(available_times, window, step):
+    available_times = sorted(available_times, key=float)
+    if not available_times:
+        return []
+    targets = np.arange(window[0], window[1] + 0.5 * step, step)
+    selected = []
+    for target in targets:
+        nearest = min(available_times, key=lambda time: abs(float(time) - target))
+        if nearest not in selected:
+            selected.append(nearest)
+    return selected
+
+for window in WINDOWS:
     fig, ax = plt.subplots(figsize=(8, 6))
-    for operator in OBSERVABLES:
-        for time in flow_times(window):
+    for operator in PLOT_OPERATORS:
+        for time in select_flow_times(flow_times(window), window, PLOT_TIME_STEP):
             x, y, data = bf.interpolation_curve(FLOW, operator, time)
+            x = np.asarray(x, dtype=float)
             ratio = np.asarray(y, dtype=object) / x**2
+            data_x = np.asarray(data.x, dtype=object)
+            data_ratio = np.asarray(data.y, dtype=object) / data_x**2
             alpha = .25 + .65 * (float(time)-window[0]) / max(window[1]-window[0], 1e-12)
-            ax.plot(x, gv.mean(ratio), color=OP_COLORS[operator], alpha=alpha, lw=1.2)
+            color = OP_COLORS[operator]
+            ax.plot(x, gv.mean(ratio), color=color, alpha=alpha, lw=1.5)
             ax.fill_between(x, gv.mean(ratio)-gv.sdev(ratio), gv.mean(ratio)+gv.sdev(ratio),
-                            color=OP_COLORS[operator], alpha=.04)
+                            color=color, alpha=.08, linewidth=0)
+            ax.errorbar(gv.mean(data_x), gv.mean(data_ratio), xerr=gv.sdev(data_x),
+                        yerr=gv.sdev(data_ratio), fmt='o', ms=4.5, capsize=2.5,
+                        elinewidth=.9, color=color, alpha=alpha,
+                        markeredgecolor='black', markeredgewidth=.35,
+                        linestyle='none', zorder=3)
     xpt = np.linspace(.01, 5, 300)
-    for loops, ls in ((1, '-'), (2, '--'), (3, '-.')):
-        ax.plot(xpt, pt_over_g4(xpt, loops), color='gray', ls=ls, label=f'{loops}-loop PT')
-    op_handles = [Line2D([0],[0], color=OP_COLORS[o], label=OP_LABELS[o]) for o in OBSERVABLES]
-    handles, labels = ax.get_legend_handles_labels()
-    ax.legend(op_handles + handles, [h.get_label() for h in op_handles] + labels, ncol=2, frameon=False)
-    ax.set(xlabel=r'$g^2_{GF}$', ylabel=r'$\beta_{GF}/g_{GF}^4$',
-           title=rf'Interpolation, $t/a^2\in[{window[0]:g},{window[1]:g}]$')
-    save_figure(fig, window, 'interpolation_beta_over_g4_fit4')'''),
+    pt_handles=[]
+    for loops, ls, label in ((1,'-','1-loop universal'),
+                             (2,'--','2-loop universal'),
+                             (3,'-.','3-loop gradient flow')):
+        line,=ax.plot(xpt,pt_over_g4(xpt,loops),color='gray',ls=ls,lw=1.4,
+                      alpha=.7,label=label)
+        pt_handles.append(line)
+    op_handles=[Line2D([0],[0],color=OP_COLORS[o],lw=1.5,marker='o',markersize=5,
+                       markeredgecolor='black',markeredgewidth=.35,label=OP_LABELS[o])
+                for o in PLOT_OPERATORS]
+    ax.legend(handles=op_handles+pt_handles,ncol=2,frameon=False)
+    ax.set(xlim=(0,5),xlabel=r'$g^2_{GF}$',ylabel=r'$\beta_{GF}/g_{GF}^4$')
+    ax.minorticks_on(); ax.grid(which='major',linestyle='-',alpha=.35)
+    ax.grid(which='minor',linestyle='--',alpha=.20)
+    ax.text(.50,.52,r'\textbf{Preliminary}',transform=ax.transAxes,fontsize=42,
+            color='gray',alpha=.28,ha='center',va='center',rotation=30,zorder=0)
+    ax.text(.58,.15,FIT_WATERMARK+'\nInterpolation with IV data, '
+            +rf'$t/a^2\in[{window[0]:g},{window[1]:g}]$'+'\n'
+            +rf'$\Delta(t/a^2)\simeq {PLOT_TIME_STEP:g}$'+'\nTLN',
+            transform=ax.transAxes,fontsize=10.5,color='gray',alpha=.52,
+            ha='center',va='center',fontweight='bold')
+    fig.tight_layout()
+    save_figure(fig,window,'interpolation_beta_over_g4_fit4_with_data')'''),
 md('## Plot 4 — interpolation quality for every flow-time range'),
 code(r'''for window in WINDOWS:
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
