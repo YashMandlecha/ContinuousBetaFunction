@@ -14,7 +14,8 @@
 
 
 from pathlib import Path
-import argparse, copy, gc, json, os, sys, time
+import argparse, copy, gc, json, os, sys
+import time as time_module
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / 'src'))
@@ -68,7 +69,7 @@ parser.add_argument(
 )
 parser.add_argument('--validate-only', action='store_true', help='Validate configuration/model construction, then exit.')
 args = parser.parse_args()
-RUN_STARTED = time.time()
+RUN_STARTED = time_module.time()
 
 if args.data_dir is None:
     parser.error('Set --data-dir or BETAFN_DATA_DIR.')
@@ -1602,7 +1603,7 @@ print(f'{FIT_ID} validation complete:',len(present),'continuum cases')
     'model_tag': MODEL_TAG,
     'continuum_cases': len(present),
     'reviewed_weak_coupling': args.reviewed_weak_coupling,
-    'elapsed_seconds': round(time.time() - RUN_STARTED, 3),
+    'elapsed_seconds': round(time_module.time() - RUN_STARTED, 3),
 }, indent=2) + '\n')
 
 
