@@ -88,14 +88,14 @@ OP_COLORS = {
 }
 
 # Exhaustive integer windows used by the scan reference notebook.
-TMIN_VALUES = tuple(range(2, 10))
-TMAX_LIMIT = 10
+TMIN_VALUES = tuple(range(4, 8))
+TMAX_LIMIT = 8
 WINDOWS = tuple(
     (float(tmin), float(tmax))
     for tmin in TMIN_VALUES
     for tmax in range(tmin + 1, TMAX_LIMIT + 1)
 )
-CENTRAL_WINDOW = (3.0, 5.0)
+CENTRAL_WINDOW = (4.0, 6.0)
 G2_GRID = (0.9, 4.9, 0.2)
 TARGET_G2 = (1.1, 1.3, 1.5, 1.8, 2.2, 2.6, 3.0, 4.0)
 
