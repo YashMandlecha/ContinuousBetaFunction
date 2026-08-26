@@ -14,7 +14,7 @@
 
 
 from pathlib import Path
-import argparse, copy, gc, json, os, sys
+import argparse, copy, gc, json, os, shutil, sys
 import time as time_module
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -75,11 +75,25 @@ if args.data_dir is None:
     parser.error('Set --data-dir or BETAFN_DATA_DIR.')
 if args.fit4_order < 1:
     parser.error('--fit4-order must be positive.')
+if args.latex:
+    missing_tex_tools = [name for name in ('latex', 'dvipng') if shutil.which(name) is None]
+    if missing_tex_tools:
+        parser.error(
+            '--latex requires the following executables on PATH: '
+            + ', '.join(missing_tex_tools)
+            + '. Load the HPCC TeX/TeX-Live module before submitting the job.'
+        )
 
 FIT_ID = args.model
 CORRECTION = args.correction
 DATA_DIR = args.data_dir.expanduser().resolve()
 plt.rcParams['text.usetex'] = args.latex
+if args.latex:
+    plt.rcParams.update({
+        'font.family': 'serif',
+        'font.serif': ['Computer Modern Roman'],
+        'text.latex.preamble': r'\usepackage{amsmath}',
+    })
 
 if FIT_ID == 'fit4':
     ORDER = args.fit4_order

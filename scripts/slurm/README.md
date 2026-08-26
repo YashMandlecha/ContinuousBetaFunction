@@ -25,9 +25,12 @@ FIT4_ORDERS="1 2 3 4" ./scripts/slurm/submit_nf4_jobs.sh
 
 Add the appropriate MSU account and partition directives to the `.sbatch`
 templates if required by your allocation. The environment must contain the
-packages from `requirements.txt`. External LaTeX is disabled by default for
-cluster portability; pass `--latex` manually only when a complete TeX setup is
-available.
+packages from `requirements.txt`. The submitted jobs enable external LaTeX so
+their typography matches the notebooks. Before submission, load the HPCC
+TeX/TeX-Live module that supplies both `latex` and `dvipng`; the runner checks
+for these programs at startup and reports a clear error if either is missing.
+When invoking the Python runner directly on a system without TeX, omit
+`--latex` to use Matplotlib's internal math renderer.
 
 Outputs are isolated as follows:
 

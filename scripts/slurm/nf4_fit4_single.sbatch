@@ -31,4 +31,5 @@ srun python -u scripts/run_nf4_analysis.py \
   --output-base "${BETAFN_OUTPUT_BASE}" \
   --binsize 15 \
   --use-gamma-method \
+  --latex \
   --reviewed-weak-coupling
