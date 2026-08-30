@@ -55,6 +55,8 @@ plt.rcParams.update({
 parser = argparse.ArgumentParser(description='Run the complete NF4 fit4/fit5/fit6 analysis without Jupyter.')
 parser.add_argument('--model', choices=('fit4', 'fit5', 'fit6'), default='fit4')
 parser.add_argument('--fit4-order', type=int, default=4, help='Correction order for fit4 only.')
+parser.add_argument('--fit4-width', type=float, default=10.0,
+                    help='Zero-centered prior width for fit4 correction coefficients.')
 parser.add_argument('--data-dir', type=Path, default=os.environ.get('BETAFN_DATA_DIR'))
 parser.add_argument('--output-base', type=Path, default=os.environ.get('BETAFN_OUTPUT_BASE', REPO_ROOT / 'hpcc_outputs'))
 parser.add_argument('--correction', choices=('tln', 'tree-level-normalization', 'finite-volume', 'none'), default='tln')
@@ -75,6 +77,8 @@ if args.data_dir is None:
     parser.error('Set --data-dir or BETAFN_DATA_DIR.')
 if args.fit4_order < 1:
     parser.error('--fit4-order must be positive.')
+if args.fit4_width <= 0:
+    parser.error('--fit4-width must be positive.')
 if args.latex:
     missing_tex_tools = [name for name in ('latex', 'dvipng') if shutil.which(name) is None]
     if missing_tex_tools:
@@ -97,26 +101,34 @@ if args.latex:
 
 if FIT_ID == 'fit4':
     ORDER = args.fit4_order
+    FIT_WIDTH = args.fit4_width
+    WIDTH_TAG = f'{FIT_WIDTH:g}'.replace('.', 'p')
     PT_POWERS = tuple(range(1, ORDER + 1))
     MODEL_TAG = f'order_{ORDER}'
-    FIT_WATERMARK = rf'fit4, correction order {ORDER}'
+    OUTPUT_FAMILY = f'fit4_width{WIDTH_TAG}'
+    FIT_WATERMARK = rf'fit4, correction order {ORDER}, prior width {FIT_WIDTH:g}'
 elif FIT_ID == 'fit5':
     ORDER = None
+    FIT_WIDTH = None
     PT_POWERS = (3,)
     MODEL_TAG = 'pt_preserving_u3'
+    OUTPUT_FAMILY = FIT_ID
     FIT_WATERMARK = r'fit5, PT-preserving order $u^3$'
 else:
     ORDER = None
+    FIT_WIDTH = None
     PT_POWERS = (3, 4)
     MODEL_TAG = 'pt_preserving_u3_u4'
+    OUTPUT_FAMILY = FIT_ID
     FIT_WATERMARK = r'fit6, PT-preserving orders $u^3+u^4$'
 
-OUTPUT_ROOT = args.output_base.expanduser().resolve() / FIT_ID / MODEL_TAG
+OUTPUT_ROOT = args.output_base.expanduser().resolve() / OUTPUT_FAMILY / MODEL_TAG
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 (OUTPUT_ROOT / 'run_configuration.json').write_text(json.dumps({
     'model': FIT_ID,
     'model_tag': MODEL_TAG,
     'fit4_order': ORDER,
+    'fit4_width': FIT_WIDTH,
     'pt_powers': PT_POWERS,
     'data_dir': str(DATA_DIR),
     'output_root': str(OUTPUT_ROOT),
@@ -129,7 +141,7 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     'slurm_array_task_id': os.environ.get('SLURM_ARRAY_TASK_ID'),
 }, indent=2) + '\n')
 
-COUPLINGS = ('20p0', '18p0', '16p0', '14p0', '12p0', '10p0', '9p00', '8p50')
+COUPLINGS = ('20p0', '18p0', '16p0', '14p0', '12p0', '11p0', '10p0', '9p50', '9p00', '8p50')
 VOLUMES = {
     coupling: ('l32l32l32t64', 'l40l40l40t80', 'l48l48l48t96')
     for coupling in COUPLINGS
@@ -168,6 +180,9 @@ def case_dir(window, mode=None):
 
 def save_figure(fig, window, name, mode=None):
     base = case_dir(window, mode) / name
+    if FIT_WIDTH is not None:
+        fig.text(0.995, 0.005, rf'prior width $={FIT_WIDTH:g}$', ha='right', va='bottom',
+                 fontsize=8, color='gray', alpha=.75)
     fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
     fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
     plt.close(fig)
@@ -206,7 +221,7 @@ bf = betafn.BetaFunction(nf=4)
 if FIT_ID == 'fit4':
     interpolation = bf.perturbative_interpolation(
         loops=3, correction_order=ORDER, free_intercept=False,
-        width=10.0, xerrors=True,
+        width=FIT_WIDTH, xerrors=True,
     )
 else:
     def pt_preserving_interpolation(x, p):
@@ -279,6 +294,9 @@ for operator in OBSERVABLES:
 ax.set(xlabel=r'$g^2_{GF}$', ylabel=r'$\beta_{GF}/g_{GF}^4$', title='Processed largest-volume data (TLN)')
 ax.legend(frameon=False)
 base = OUTPUT_ROOT / f'processed_largest_volume_{FIT_ID}'
+if FIT_WIDTH is not None:
+    fig.text(0.995, 0.005, rf'prior width $={FIT_WIDTH:g}$', ha='right', va='bottom',
+             fontsize=8, color='gray', alpha=.75)
 fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
 fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
 plt.close(fig)
@@ -297,12 +315,120 @@ print(bf.stage_summary('infinite_volume'))
 print(bf.stage_summary('interpolation'))
 
 
+def save_interpolation_diagnostics():
+    """Save per-fit quality and per-coupling interpolation residuals."""
+    detail_rows = []
+    for window in WINDOWS:
+        for operator in OBSERVABLES:
+            times = [
+                time for time in sorted(bf.ntrp_fits[FLOW][operator], key=float)
+                if window[0] <= float(time) <= window[1]
+            ]
+            for time in times:
+                data = bf.interpolation.fetch('inputs', (FLOW, operator, time))
+                params = bf.interpolation.fetch('fits', (FLOW, operator, time))
+                qof = bf.interpolation.fetch('quality', (FLOW, operator, time))
+                data_x = np.asarray(data.x, dtype=object)
+                data_y = np.asarray(data.y, dtype=object)
+                fitted_x = np.asarray(params['x'], dtype=object) if 'x' in params else data_x
+                prediction = np.asarray([
+                    bf.interpolation.model.evaluate(value, params) for value in fitted_x
+                ], dtype=object)
+                residual = data_y - prediction
+                residual_sdev = np.asarray(gv.sdev(residual), dtype=float)
+                pull = np.divide(
+                    gv.mean(residual), residual_sdev,
+                    out=np.full(len(residual), np.nan), where=residual_sdev > 0,
+                )
+                fit_couplings = [
+                    coupling for coupling in COUPLINGS
+                    if time in bf.iv_fits[coupling]['g2'][FLOW][operator]
+                    and time in bf.iv_fits[coupling]['beta'][FLOW][operator]
+                ]
+                if len(fit_couplings) != len(data_y):
+                    raise RuntimeError(
+                        f'Coupling/data mismatch for {operator}, t={time}: '
+                        f'{len(fit_couplings)} versus {len(data_y)}'
+                    )
+                chi2 = float(qof['chi2'])
+                dof = int(qof['dof'])
+                parameter_summary = '; '.join(
+                    f'{name}={params[name][0]}' for name in sorted(params) if name != 'x'
+                )
+                for index, coupling in enumerate(fit_couplings):
+                    detail_rows.append({
+                        'prior_width': FIT_WIDTH,
+                        'window': window_tag(window),
+                        'operator': operator,
+                        'operator_label': OP_LABELS[operator],
+                        'flow_time': float(time),
+                        'coupling': coupling,
+                        'beta_b': beta_value(coupling),
+                        'g2_mean': float(gv.mean(data_x[index])),
+                        'g2_sdev': float(gv.sdev(data_x[index])),
+                        'fitted_g2_mean': float(gv.mean(fitted_x[index])),
+                        'beta_mean': float(gv.mean(data_y[index])),
+                        'beta_sdev': float(gv.sdev(data_y[index])),
+                        'prediction_mean': float(gv.mean(prediction[index])),
+                        'prediction_sdev': float(gv.sdev(prediction[index])),
+                        'residual_mean': float(gv.mean(residual[index])),
+                        'residual_sdev': float(residual_sdev[index]),
+                        'signed_sigma_deviation': float(pull[index]),
+                        'abs_sigma_deviation': float(abs(pull[index])),
+                        'chi2_including_priors': chi2,
+                        'dof_reported': dof,
+                        'chi2_per_dof': chi2 / dof if dof else np.nan,
+                        'p_value': float(qof['p-value']),
+                        'logGBF': qof.get('logGBF'),
+                        'n_data_points': len(data_y),
+                        'n_coefficient_priors': ORDER,
+                        'xerrors': config.interpolation.xerrors,
+                        'posterior_parameters': parameter_summary,
+                    })
+
+    details = pd.DataFrame(detail_rows)
+    fit_columns = [
+        'prior_width', 'window', 'operator', 'operator_label', 'flow_time',
+        'chi2_including_priors', 'dof_reported', 'chi2_per_dof', 'p_value',
+        'logGBF', 'n_data_points', 'n_coefficient_priors', 'xerrors',
+        'posterior_parameters',
+    ]
+    summary = (
+        details[fit_columns]
+        .drop_duplicates(['window', 'operator', 'flow_time'])
+        .sort_values(['window', 'operator', 'flow_time'])
+        .reset_index(drop=True)
+    )
+    details.to_csv(OUTPUT_ROOT / 'interpolation_diagnostics_by_coupling.csv', index=False)
+    summary.to_csv(OUTPUT_ROOT / 'interpolation_fit_quality_summary.csv', index=False)
+    (OUTPUT_ROOT / 'interpolation_fit_quality_summary.txt').write_text(
+        summary.to_string(index=False) + '\n'
+    )
+    for window in WINDOWS:
+        tag = window_tag(window)
+        window_details = details.query('window == @tag')
+        window_summary = summary.query('window == @tag')
+        window_details.to_csv(
+            case_dir(window) / 'interpolation_diagnostics_by_coupling.csv', index=False
+        )
+        window_summary.to_csv(
+            case_dir(window) / 'interpolation_fit_quality_summary.csv', index=False
+        )
+        (case_dir(window) / 'interpolation_fit_quality_summary.txt').write_text(
+            window_summary.to_string(index=False) + '\n'
+        )
+
+
+if FIT_ID == 'fit4':
+    save_interpolation_diagnostics()
+
+
 # ## Plot 2 — infinite-volume extrapolations for every bare coupling
 
 # In[7]:
 
 
-fig, axes = plt.subplots(2, 4, figsize=(18, 9))
+fig, axes = plt.subplots(2, 5, figsize=(22, 9))
 for ax, coupling in zip(axes.ravel(), COUPLINGS):
     times = sorted(bf.iv_fits[coupling]['g2'][FLOW][OBSERVABLES[0]], key=float)
     time = min(times, key=lambda t: abs(float(t) - CENTRAL_WINDOW[0]))
@@ -320,6 +446,9 @@ handles, labels = axes.ravel()[0].get_legend_handles_labels()
 fig.legend(handles, labels, ncol=3, loc='upper center', frameon=False)
 fig.tight_layout(rect=(0, 0, 1, .96))
 base = OUTPUT_ROOT / f'infinite_volume_all_beta_{FIT_ID}'
+if FIT_WIDTH is not None:
+    fig.text(0.995, 0.005, rf'prior width $={FIT_WIDTH:g}$', ha='right', va='bottom',
+             fontsize=8, color='gray', alpha=.75)
 fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
 fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
 plt.close(fig)
@@ -330,7 +459,7 @@ plt.close(fig)
 
 # Infinite-volume extrapolation: beta_GF versus 1/V
 
-fig, axes = plt.subplots(2, 4, figsize=(18, 9))
+fig, axes = plt.subplots(2, 5, figsize=(22, 9))
 
 for ax, coupling in zip(axes.ravel(), COUPLINGS):
   available_times = sorted(
@@ -461,7 +590,7 @@ plt.close(fig)
 # Infinite-volume extrapolation:
 # beta_GF / g_GF^4 versus 1/V
 
-fig, axes = plt.subplots(2, 4, figsize=(18, 9))
+fig, axes = plt.subplots(2, 5, figsize=(22, 9))
 
 for ax, coupling in zip(axes.ravel(), COUPLINGS):
   available_times = sorted(

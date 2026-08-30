@@ -9,6 +9,7 @@
 set -euo pipefail
 
 : "${FIT4_ORDER:?Submit with FIT4_ORDER set; use submit_nf4_jobs.sh.}"
+: "${FIT4_WIDTH:=10}"
 : "${BETAFN_DATA_DIR:?Set BETAFN_DATA_DIR to the HPCC dataset directory.}"
 : "${BETAFN_OUTPUT_BASE:?Set BETAFN_OUTPUT_BASE to an HPCC output directory.}"
 : "${BETAFN_VENV:?Set BETAFN_VENV to the Python virtual-environment directory.}"
@@ -27,6 +28,7 @@ mkdir -p "${NUMBA_CACHE_DIR}"
 srun python -u scripts/run_nf4_analysis.py \
   --model fit4 \
   --fit4-order "${FIT4_ORDER}" \
+  --fit4-width "${FIT4_WIDTH}" \
   --data-dir "${BETAFN_DATA_DIR}" \
   --output-base "${BETAFN_OUTPUT_BASE}" \
   --binsize 15 \
