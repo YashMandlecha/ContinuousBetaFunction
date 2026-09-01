@@ -72,7 +72,7 @@ DATA_DIR = Path('/Users/yaman/Contbetafn/data/New Four')
 OUTPUT_ROOT = REPO_ROOT / 'src/betafn' / FIT_ID / f'order_{ORDER}'
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-COUPLINGS = ('20p0', '18p0', '16p0', '14p0', '12p0', '10p0', '9p00', '8p50')
+COUPLINGS = ('20p0', '18p0', '16p0', '14p0', '12p0', '11p0', '10p0', '9p50', '9p00', '8p50')
 VOLUMES = {
     coupling: ('l32l32l32t64', 'l40l40l40t80', 'l48l48l48t96')
     for coupling in COUPLINGS
@@ -199,7 +199,7 @@ print(bf.stage_summary('chiral'))
 print(bf.stage_summary('infinite_volume'))
 print(bf.stage_summary('interpolation'))'''),
 md('## Plot 2 — infinite-volume extrapolations for every bare coupling'),
-code(r'''fig, axes = plt.subplots(2, 4, figsize=(18, 9))
+code(r'''fig, axes = plt.subplots(2, 5, figsize=(22, 9))
 for ax, coupling in zip(axes.ravel(), COUPLINGS):
     times = sorted(bf.iv_fits[coupling]['g2'][FLOW][OBSERVABLES[0]], key=float)
     time = min(times, key=lambda t: abs(float(t) - CENTRAL_WINDOW[0]))
@@ -223,7 +223,7 @@ plt.show(); plt.close(fig)'''),
 md('## Plot 2b — infinite-volume beta_GF versus 1/V'),
 code(r'''# Infinite-volume extrapolation: beta_GF versus 1/V
 
-fig, axes = plt.subplots(2, 4, figsize=(18, 9))
+fig, axes = plt.subplots(2, 5, figsize=(22, 9))
 
 for ax, coupling in zip(axes.ravel(), COUPLINGS):
   available_times = sorted(
@@ -350,7 +350,7 @@ md('## Plot 2c — infinite-volume beta_GF/g_GF^4 versus 1/V'),
 code(r'''# Infinite-volume extrapolation:
 # beta_GF / g_GF^4 versus 1/V
 
-fig, axes = plt.subplots(2, 4, figsize=(18, 9))
+fig, axes = plt.subplots(2, 5, figsize=(22, 9))
 
 for ax, coupling in zip(axes.ravel(), COUPLINGS):
   available_times = sorted(
@@ -558,7 +558,7 @@ for window in WINDOWS:
     gc.collect()
 
 print(f'saved {2 * len(WINDOWS)} continuum cases')'''),
-md('## Plot 3 — interpolation curves together with the fitted IV data points'),
+md('## Plot 3b — beta/g^4 interpolation curves with fitted IV data and coefficients'),
 code(r'''PLOT_TIME_STEP = 0.25
 PLOT_OPERATORS = OBSERVABLES
 
@@ -576,8 +576,23 @@ def select_flow_times(available_times, window, step):
 
 for window in WINDOWS:
     fig, ax = plt.subplots(figsize=(8, 6))
+    coefficient_lines = []
     for operator in PLOT_OPERATORS:
-        for time in select_flow_times(flow_times(window), window, PLOT_TIME_STEP):
+        times = select_flow_times(flow_times(window), window, PLOT_TIME_STEP)
+        if times:
+            coefficient_time = times[-1]
+            coefficient_fit = bf.interpolation.fetch(
+                'fits', (FLOW, operator, coefficient_time),
+            )
+            coefficient_values = ', '.join(
+                rf'$c_{{{index}}}={format(coefficient_fit[f"pt_c{index}"][0], "2p")}$'
+                for index in range(1, ORDER + 1)
+            )
+            coefficient_lines.append(
+                rf'{OP_LABELS[operator]}, $t/a^2={float(coefficient_time):g}$: '
+                + coefficient_values
+            )
+        for time in times:
             x, y, data = bf.interpolation_curve(FLOW, operator, time)
             x = np.asarray(x, dtype=float)
             ratio = np.asarray(y, dtype=object) / x**2
@@ -604,7 +619,11 @@ for window in WINDOWS:
     op_handles=[Line2D([0],[0],color=OP_COLORS[o],lw=1.5,marker='o',markersize=5,
                        markeredgecolor='black',markeredgewidth=.35,label=OP_LABELS[o])
                 for o in PLOT_OPERATORS]
-    ax.legend(handles=op_handles+pt_handles,ncol=2,frameon=False)
+    ax.legend(handles=op_handles+pt_handles,ncol=2,loc='upper left',frameon=False)
+    ax.text(.98,.98,'\n'.join(coefficient_lines),transform=ax.transAxes,
+            ha='right',va='top',fontsize=7.5,
+            bbox=dict(boxstyle='round,pad=0.35',facecolor='white',
+                      edgecolor='gray',alpha=.88),zorder=10)
     ax.set(xlim=(0,5),xlabel=r'$g^2_{GF}$',ylabel=r'$\beta_{GF}/g_{GF}^4$')
     ax.minorticks_on(); ax.grid(which='major',linestyle='-',alpha=.35)
     ax.grid(which='minor',linestyle='--',alpha=.20)

@@ -807,7 +807,7 @@ for window in WINDOWS:
 print(f'saved {2 * len(WINDOWS)} continuum cases')
 
 
-# ## Plot 3 — interpolation curves together with the fitted IV data points
+# ## Plot 3b — beta/g^4 interpolation curves with fitted IV data and coefficients
 
 # In[ ]:
 
@@ -832,9 +832,23 @@ def select_flow_times(available_times, window, step):
 
 for window in WINDOWS:
     fig, ax = plt.subplots(figsize=(8, 6))
+    coefficient_lines = []
 
     for operator in PLOT_OPERATORS:
         times = select_flow_times(flow_times(window), window, PLOT_TIME_STEP)
+        if times:
+            coefficient_time = times[-1]
+            coefficient_fit = bf.interpolation.fetch(
+                'fits', (FLOW, operator, coefficient_time),
+            )
+            coefficient_values = ', '.join(
+                rf'$c_{{{index}}}={format(coefficient_fit[f"pt_c{index}"][0], "2p")}$'
+                for index in range(1, ORDER + 1)
+            )
+            coefficient_lines.append(
+                rf'{OP_LABELS[operator]}, $t/a^2={float(coefficient_time):g}$: '
+                + coefficient_values
+            )
         for time in times:
             x_grid, beta_grid, data = bf.interpolation_curve(FLOW, operator, time)
             x_grid = np.asarray(x_grid, dtype=float)
@@ -902,7 +916,28 @@ for window in WINDOWS:
         )
         for operator in PLOT_OPERATORS
     ]
-    ax.legend(handles=operator_handles + pt_handles, ncol=2, frameon=False)
+    ax.legend(
+        handles=operator_handles + pt_handles,
+        ncol=2,
+        loc='upper left',
+        frameon=False,
+    )
+    ax.text(
+        0.98,
+        0.98,
+        '\n'.join(coefficient_lines),
+        transform=ax.transAxes,
+        ha='right',
+        va='top',
+        fontsize=7.5,
+        bbox=dict(
+            boxstyle='round,pad=0.35',
+            facecolor='white',
+            edgecolor='gray',
+            alpha=0.88,
+        ),
+        zorder=10,
+    )
     ax.set(
         xlim=(0, 5),
         xlabel=r"$g^2_{GF}$",
