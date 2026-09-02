@@ -61,6 +61,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--widths", type=positive_float, nargs="+", default=(1.0, 3.0, 10.0, 30.0)
     )
+    parser.add_argument(
+        "--no-priors", action="store_true",
+        help="Submit one prior-free, xerrors=False job for each requested order.",
+    )
     parser.add_argument("--time", default="24:00:00", help="SLURM wall time")
     parser.add_argument("--cpus", type=positive_int, default=8)
     parser.add_argument("--memory", default="64G")
@@ -84,15 +88,18 @@ def main() -> int:
     log_dir.mkdir(parents=True, exist_ok=True)
     Path(environment["BETAFN_OUTPUT_BASE"]).mkdir(parents=True, exist_ok=True)
 
-    submitted: list[tuple[int, float, str]] = []
+    submitted: list[tuple[int, float | None, str]] = []
+    widths: tuple[float | None, ...] = (None,) if args.no_priors else tuple(args.widths)
     for order in args.orders:
-        for width in args.widths:
-            job_name = f"nf4-o{order}-w{width_tag(width)}"
+        for width in widths:
+            no_priors = width is None
+            job_name = f"nf4-o{order}-nopriors" if no_priors else f"nf4-o{order}-w{width_tag(width)}"
             exported = ",".join(
                 (
                     "ALL",
                     f"FIT4_ORDER={order}",
-                    f"FIT4_WIDTH={width_text(width)}",
+                    f"FIT4_WIDTH={10 if no_priors else width_text(width)}",
+                    f"FIT4_NO_PRIORS={1 if no_priors else 0}",
                     f"BETAFN_REPO_DIR={REPO_ROOT}",
                     f"BETAFN_DATA_DIR={environment['BETAFN_DATA_DIR']}",
                     f"BETAFN_OUTPUT_BASE={environment['BETAFN_OUTPUT_BASE']}",
@@ -130,7 +137,8 @@ def main() -> int:
             )
             job_id = result.stdout.strip().split(";", 1)[0]
             submitted.append((order, width, job_id))
-            print(f"submitted order={order}, width={width_text(width)}: job {job_id}")
+            case = "no priors, xerrors=False" if no_priors else f"width={width_text(width)}"
+            print(f"submitted order={order}, {case}: job {job_id}")
 
     print(f"Prepared {len(submitted)} independent fit4 job(s).")
     return 0

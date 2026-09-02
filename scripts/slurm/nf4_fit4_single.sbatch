@@ -10,6 +10,7 @@ set -euo pipefail
 
 : "${FIT4_ORDER:?Submit with FIT4_ORDER set; use submit_nf4_jobs.sh.}"
 : "${FIT4_WIDTH:=10}"
+: "${FIT4_NO_PRIORS:=0}"
 : "${BETAFN_DATA_DIR:?Set BETAFN_DATA_DIR to the HPCC dataset directory.}"
 : "${BETAFN_OUTPUT_BASE:?Set BETAFN_OUTPUT_BASE to an HPCC output directory.}"
 : "${BETAFN_VENV:?Set BETAFN_VENV to the Python virtual-environment directory.}"
@@ -25,12 +26,18 @@ export NUMBA_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export NUMBA_CACHE_DIR="${SLURM_TMPDIR:-/tmp}/betafn-numba-${SLURM_JOB_ID}"
 mkdir -p "${NUMBA_CACHE_DIR}"
 
-srun python -u scripts/run_nf4_analysis.py \
-  --model fit4 \
-  --fit4-order "${FIT4_ORDER}" \
-  --fit4-width "${FIT4_WIDTH}" \
-  --data-dir "${BETAFN_DATA_DIR}" \
-  --output-base "${BETAFN_OUTPUT_BASE}" \
-  --binsize 15 \
-  --use-gamma-method \
+fit4_args=(
+  --model fit4
+  --fit4-order "${FIT4_ORDER}"
+  --fit4-width "${FIT4_WIDTH}"
+  --data-dir "${BETAFN_DATA_DIR}"
+  --output-base "${BETAFN_OUTPUT_BASE}"
+  --binsize 15
+  --use-gamma-method
   --reviewed-weak-coupling
+)
+if [[ "${FIT4_NO_PRIORS}" == "1" ]]; then
+  fit4_args+=(--fit4-no-priors)
+fi
+
+srun python -u scripts/run_nf4_analysis.py "${fit4_args[@]}"

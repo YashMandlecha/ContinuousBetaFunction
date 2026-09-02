@@ -57,6 +57,10 @@ parser.add_argument('--model', choices=('fit4', 'fit5', 'fit6'), default='fit4')
 parser.add_argument('--fit4-order', type=int, default=4, help='Correction order for fit4 only.')
 parser.add_argument('--fit4-width', type=float, default=10.0,
                     help='Zero-centered prior width for fit4 correction coefficients.')
+parser.add_argument(
+    '--fit4-no-priors', action='store_true',
+    help='Fit fit4 coefficients without priors; requires xerrors=False.',
+)
 parser.add_argument('--data-dir', type=Path, default=os.environ.get('BETAFN_DATA_DIR'))
 parser.add_argument('--output-base', type=Path, default=os.environ.get('BETAFN_OUTPUT_BASE', REPO_ROOT / 'hpcc_outputs'))
 parser.add_argument('--correction', choices=('tln', 'tree-level-normalization', 'finite-volume', 'none'), default='tln')
@@ -79,6 +83,8 @@ if args.fit4_order < 1:
     parser.error('--fit4-order must be positive.')
 if args.fit4_width <= 0:
     parser.error('--fit4-width must be positive.')
+if args.fit4_no_priors and args.model != 'fit4':
+    parser.error('--fit4-no-priors is only valid with --model fit4.')
 if args.latex:
     missing_tex_tools = [name for name in ('latex', 'dvipng') if shutil.which(name) is None]
     if missing_tex_tools:
@@ -101,23 +107,39 @@ if args.latex:
 
 if FIT_ID == 'fit4':
     ORDER = args.fit4_order
-    FIT_WIDTH = args.fit4_width
-    WIDTH_TAG = f'{FIT_WIDTH:g}'.replace('.', 'p')
     PT_POWERS = tuple(range(1, ORDER + 1))
     MODEL_TAG = f'order_{ORDER}'
-    OUTPUT_FAMILY = f'fit4_width{WIDTH_TAG}'
-    FIT_WATERMARK = rf'fit4, correction order {ORDER}, prior width {FIT_WIDTH:g}'
+    FIT_NO_PRIORS = args.fit4_no_priors
+    if FIT_NO_PRIORS:
+        FIT_WIDTH = None
+        FIT_PRIOR_COUNT = 0
+        OUTPUT_FAMILY = 'fit4_nopriors'
+        FIT_WATERMARK = rf'fit4, correction order {ORDER}, no priors, $x$ errors off'
+        FIT_FOOTER = 'no coefficient priors, xerrors=False'
+    else:
+        FIT_WIDTH = args.fit4_width
+        FIT_PRIOR_COUNT = ORDER
+        WIDTH_TAG = f'{FIT_WIDTH:g}'.replace('.', 'p')
+        OUTPUT_FAMILY = f'fit4_width{WIDTH_TAG}'
+        FIT_WATERMARK = rf'fit4, correction order {ORDER}, prior width {FIT_WIDTH:g}'
+        FIT_FOOTER = rf'prior width $={FIT_WIDTH:g}$, xerrors=True'
 elif FIT_ID == 'fit5':
     ORDER = None
     FIT_WIDTH = None
+    FIT_NO_PRIORS = False
     PT_POWERS = (3,)
+    FIT_PRIOR_COUNT = len(PT_POWERS)
+    FIT_FOOTER = None
     MODEL_TAG = 'pt_preserving_u3'
     OUTPUT_FAMILY = FIT_ID
     FIT_WATERMARK = r'fit5, PT-preserving order $u^3$'
 else:
     ORDER = None
     FIT_WIDTH = None
+    FIT_NO_PRIORS = False
     PT_POWERS = (3, 4)
+    FIT_PRIOR_COUNT = len(PT_POWERS)
+    FIT_FOOTER = None
     MODEL_TAG = 'pt_preserving_u3_u4'
     OUTPUT_FAMILY = FIT_ID
     FIT_WATERMARK = r'fit6, PT-preserving orders $u^3+u^4$'
@@ -129,6 +151,8 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     'model_tag': MODEL_TAG,
     'fit4_order': ORDER,
     'fit4_width': FIT_WIDTH,
+    'fit4_no_priors': FIT_NO_PRIORS,
+    'interpolation_xerrors': not FIT_NO_PRIORS if FIT_ID == 'fit4' else True,
     'pt_powers': PT_POWERS,
     'data_dir': str(DATA_DIR),
     'output_root': str(OUTPUT_ROOT),
@@ -180,8 +204,8 @@ def case_dir(window, mode=None):
 
 def save_figure(fig, window, name, mode=None):
     base = case_dir(window, mode) / name
-    if FIT_WIDTH is not None:
-        fig.text(0.995, 0.005, rf'prior width $={FIT_WIDTH:g}$', ha='right', va='bottom',
+    if FIT_FOOTER is not None:
+        fig.text(0.995, 0.005, FIT_FOOTER, ha='right', va='bottom',
                  fontsize=8, color='gray', alpha=.75)
     fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
     fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
@@ -219,10 +243,27 @@ if not DATA_DIR.is_dir():
 
 bf = betafn.BetaFunction(nf=4)
 if FIT_ID == 'fit4':
-    interpolation = bf.perturbative_interpolation(
-        loops=3, correction_order=ORDER, free_intercept=False,
-        width=FIT_WIDTH, xerrors=True,
-    )
+    if FIT_NO_PRIORS:
+        def prior_free_interpolation(x, p):
+            u = np.asarray(x) / bf.perturbative_beta_function.nrm
+            correction = 1.0
+            term = 1.0
+            for index in range(1, ORDER + 1):
+                term = term * u
+                correction = correction + p[f'pt_c{index}'][0] * term
+            return bf.perturbative_beta_function(x, loops=3) * correction
+
+        interpolation = betafn.InterpolationSpec(
+            fcn=prior_free_interpolation,
+            prior=None,
+            p0={f'pt_c{index}': 0.0 for index in range(1, ORDER + 1)},
+            xerrors=False,
+        )
+    else:
+        interpolation = bf.perturbative_interpolation(
+            loops=3, correction_order=ORDER, free_intercept=False,
+            width=FIT_WIDTH, xerrors=True,
+        )
 else:
     def pt_preserving_interpolation(x, p):
         u = np.asarray(x) / bf.perturbative_beta_function.nrm
@@ -294,8 +335,8 @@ for operator in OBSERVABLES:
 ax.set(xlabel=r'$g^2_{GF}$', ylabel=r'$\beta_{GF}/g_{GF}^4$', title='Processed largest-volume data (TLN)')
 ax.legend(frameon=False)
 base = OUTPUT_ROOT / f'processed_largest_volume_{FIT_ID}'
-if FIT_WIDTH is not None:
-    fig.text(0.995, 0.005, rf'prior width $={FIT_WIDTH:g}$', ha='right', va='bottom',
+if FIT_FOOTER is not None:
+    fig.text(0.995, 0.005, FIT_FOOTER, ha='right', va='bottom',
              fontsize=8, color='gray', alpha=.75)
 fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
 fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
@@ -381,7 +422,7 @@ def save_interpolation_diagnostics():
                         'p_value': float(qof['p-value']),
                         'logGBF': qof.get('logGBF'),
                         'n_data_points': len(data_y),
-                        'n_coefficient_priors': ORDER,
+                        'n_coefficient_priors': FIT_PRIOR_COUNT,
                         'xerrors': config.interpolation.xerrors,
                         'posterior_parameters': parameter_summary,
                     })
@@ -446,8 +487,8 @@ handles, labels = axes.ravel()[0].get_legend_handles_labels()
 fig.legend(handles, labels, ncol=3, loc='upper center', frameon=False)
 fig.tight_layout(rect=(0, 0, 1, .96))
 base = OUTPUT_ROOT / f'infinite_volume_all_beta_{FIT_ID}'
-if FIT_WIDTH is not None:
-    fig.text(0.995, 0.005, rf'prior width $={FIT_WIDTH:g}$', ha='right', va='bottom',
+if FIT_FOOTER is not None:
+    fig.text(0.995, 0.005, FIT_FOOTER, ha='right', va='bottom',
              fontsize=8, color='gray', alpha=.75)
 fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
 fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
