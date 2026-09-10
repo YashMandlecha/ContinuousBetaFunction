@@ -988,7 +988,7 @@ for window in WINDOWS:
     ax.grid(which="major", linestyle="-", alpha=0.35)
     ax.grid(which="minor", linestyle="--", alpha=0.20)
     ax.text(
-        0.50, 0.52, r"\textbf{Preliminary}", transform=ax.transAxes,
+        0.50, 0.52, "Preliminary", transform=ax.transAxes,
         fontsize=42, color="gray", alpha=0.28, ha="center", va="center",
         rotation=30, zorder=0,
     )
@@ -1059,7 +1059,7 @@ for window in WINDOWS:
       ax1.text(
           0.50,
           0.52,
-          r'\textbf{Preliminary}',
+          'Preliminary',
           transform=ax1.transAxes,
           fontsize=42,
           color='gray',
@@ -1313,7 +1313,7 @@ def plot_continuum_panels(window, mode, divide_by_g4):
       fig.text(
           .50,
           .52,
-          r'\textbf{Preliminary}',
+          'Preliminary',
           fontsize=58,
           color='gray',
           alpha=.18,
@@ -1475,7 +1475,7 @@ for window in WINDOWS:
               ax.text(
                   .50,
                   .52,
-                  r'\textbf{Preliminary}',
+                  'Preliminary',
                   transform=ax.transAxes,
                   fontsize=36,
                   color='gray',
@@ -1613,7 +1613,7 @@ def plot_final_curve(window, mode, divide_by_g4):
       ax.text(
           .50,
           .52,
-          r'\textbf{Preliminary}',
+          'Preliminary',
           transform=ax.transAxes,
           fontsize=42,
           color='gray',
@@ -1788,7 +1788,7 @@ for window in WINDOWS:
       ax.text(
           .50,
           .52,
-          r'\textbf{Preliminary}',
+          'Preliminary',
           transform=ax.transAxes,
           fontsize=42,
           color='gray',
@@ -2026,7 +2026,7 @@ for window in WINDOWS:
   ax.text(
       .50,
       .52,
-      r'\textbf{Preliminary}',
+      'Preliminary',
       transform=ax.transAxes,
       fontsize=42,
       color='gray',
