@@ -35,8 +35,7 @@ print('repository:', REPO_ROOT)
 
 plt.style.use('seaborn-v0_8-whitegrid')
 plt.rcParams.update({
-    'text.usetex': False, 'font.family': 'serif',
-    'font.serif': ['Computer Modern'], 'font.size': 15,
+    'text.usetex': False, 'font.family': 'DejaVu Serif', 'font.size': 15,
     'figure.dpi': 300, 'savefig.dpi': 300,
     'axes.labelsize': 20, 'axes.titlesize': 18,
     'legend.fontsize': 11, 'xtick.labelsize': 18, 'ytick.labelsize': 18,
@@ -874,6 +873,14 @@ def select_flow_times(available_times, window, step):
     return selected
 
 
+def interpolation_coefficient_items(fit):
+    """Return the active model's fitted coefficient labels and values."""
+    if FIT_ID == 'fit4':
+        return [(rf'c_{{{index}}}', fit[f'pt_c{index}'][0])
+                for index in range(1, ORDER + 1)]
+    return [(rf'd_{{{power}}}', fit[f'd{power}'][0]) for power in PT_POWERS]
+
+
 for window in WINDOWS:
     fig, ax = plt.subplots(figsize=(8, 6))
     coefficient_lines = []
@@ -886,8 +893,8 @@ for window in WINDOWS:
                 'fits', (FLOW, operator, coefficient_time),
             )
             coefficient_values = ', '.join(
-                rf'$c_{{{index}}}={format(coefficient_fit[f"pt_c{index}"][0], "2p")}$'
-                for index in range(1, ORDER + 1)
+                rf'${label}={format(value, "2p")}$'
+                for label, value in interpolation_coefficient_items(coefficient_fit)
             )
             coefficient_lines.append(
                 rf'{OP_LABELS[operator]}, $t/a^2={float(coefficient_time):g}$: '

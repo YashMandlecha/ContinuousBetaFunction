@@ -26,6 +26,7 @@ source "${BETAFN_VENV}/bin/activate"
 export MPLBACKEND=Agg
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export NUMBA_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
+export NUMBA_THREADING_LAYER=workqueue
 export NUMBA_CACHE_DIR="${SLURM_TMPDIR:-/tmp}/betafn-numba-${SLURM_JOB_ID}"
 mkdir -p "${NUMBA_CACHE_DIR}"
 
