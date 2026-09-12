@@ -51,11 +51,17 @@ plt.rcParams.update({
 # In[2]:
 
 
-parser = argparse.ArgumentParser(description='Run the complete NF4 fit4/fit5/fit6 analysis without Jupyter.')
-parser.add_argument('--model', choices=('fit4', 'fit5', 'fit6'), default='fit4')
+parser = argparse.ArgumentParser(description='Run the complete NF4 fit4/fit5/fit6/fit7 analysis without Jupyter.')
+parser.add_argument('--model', choices=('fit4', 'fit5', 'fit6', 'fit7'), default='fit4')
 parser.add_argument('--fit4-order', type=int, default=4, help='Correction order for fit4 only.')
 parser.add_argument('--fit4-width', type=float, default=10.0,
                     help='Zero-centered prior width for fit4 correction coefficients.')
+parser.add_argument('--fit5-order', type=int, choices=(1, 2), default=2,
+                    help='Number of free higher-order terms in fit5.')
+parser.add_argument('--fit6-order', type=int, choices=(1, 2), default=2,
+                    help='Number of free higher-order terms in fit6.')
+parser.add_argument('--fit7-order', type=int, choices=(1, 2), default=2,
+                    help='Number of free higher-order terms in fit7.')
 parser.add_argument(
     '--fit4-no-priors', action='store_true',
     help='Fit fit4 coefficients without priors; requires xerrors=False.',
@@ -123,37 +129,57 @@ if FIT_ID == 'fit4':
         FIT_WATERMARK = rf'fit4, correction order {ORDER}, prior width {FIT_WIDTH:g}'
         FIT_FOOTER = rf'prior width $={FIT_WIDTH:g}$, xerrors=True'
 elif FIT_ID == 'fit5':
-    ORDER = None
+    ORDER = args.fit5_order
     FIT_WIDTH = None
     FIT_NO_PRIORS = False
-    # Keep the complete three-loop GF beta-function ratio fixed and add two
-    # higher-order polynomial terms.  In u=g_GF^2/(4*pi), d3 and d4 have
-    # broad N(0, 10^2) priors and are effectively data-determined.
-    PT_POWERS = (3, 4)
+    # Keep the complete three-loop GF beta-function ratio fixed and add one
+    # or two higher-order polynomial terms.  In u=g_GF^2/(4*pi), these terms
+    # have broad N(0, 10^2) priors and are effectively data-determined.
+    PT_POWERS = tuple(range(3, 3 + ORDER))
     FIT_PRIOR_COUNT = len(PT_POWERS)
     FIT_FOOTER = None
-    MODEL_TAG = 'pt_fixed_additive_u3_u4'
+    MODEL_TAG = 'pt_fixed_additive_' + '_'.join(f'u{power}' for power in PT_POWERS)
     OUTPUT_FAMILY = FIT_ID
-    FIT_WATERMARK = r'fit5, fixed 3-loop PT + additive $u^3,u^4$ terms'
+    powers_label = '+'.join(f'u^{power}' for power in PT_POWERS)
+    FIT_WATERMARK = rf'fit5, fixed 3-loop PT + additive ${powers_label}$'
+elif FIT_ID == 'fit6':
+    ORDER = args.fit6_order
+    FIT_WIDTH = None
+    FIT_NO_PRIORS = False
+    PT_POWERS = tuple(range(3, 3 + ORDER))
+    FIT_PRIOR_COUNT = 1 + len(PT_POWERS)
+    FIT_FOOTER = None
+    MODEL_TAG = 'two_loop_free_additive_' + '_'.join(
+        f'u{power}' for power in PT_POWERS
+    )
+    OUTPUT_FAMILY = FIT_ID
+    powers_label = '+'.join(f'u^{power}' for power in PT_POWERS)
+    FIT_WATERMARK = rf'fit6, free 2-loop coefficient + ${powers_label}$'
 else:
-    ORDER = None
+    ORDER = args.fit7_order
     FIT_WIDTH = None
     FIT_NO_PRIORS = False
-    PT_POWERS = (3, 4)
-    FIT_PRIOR_COUNT = len(PT_POWERS)
+    PT_POWERS = tuple(range(3, 3 + ORDER))
+    FIT_PRIOR_COUNT = 1 + len(PT_POWERS)
     FIT_FOOTER = None
-    MODEL_TAG = 'pt_preserving_u3_u4'
+    MODEL_TAG = 'three_loop_free_additive_' + '_'.join(
+        f'u{power}' for power in PT_POWERS
+    )
     OUTPUT_FAMILY = FIT_ID
-    FIT_WATERMARK = r'fit6, PT-preserving orders $u^3+u^4$'
+    powers_label = '+'.join(f'u^{power}' for power in PT_POWERS)
+    FIT_WATERMARK = rf'fit7, free 3-loop coefficient + ${powers_label}$'
 
 OUTPUT_ROOT = args.output_base.expanduser().resolve() / OUTPUT_FAMILY / MODEL_TAG
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 (OUTPUT_ROOT / 'run_configuration.json').write_text(json.dumps({
     'model': FIT_ID,
     'model_tag': MODEL_TAG,
-    'fit4_order': ORDER,
+    'fit4_order': ORDER if FIT_ID == 'fit4' else None,
     'fit4_width': FIT_WIDTH,
     'fit4_no_priors': FIT_NO_PRIORS,
+    'fit5_order': args.fit5_order if FIT_ID == 'fit5' else None,
+    'fit6_order': args.fit6_order if FIT_ID == 'fit6' else None,
+    'fit7_order': args.fit7_order if FIT_ID == 'fit7' else None,
     'interpolation_xerrors': not FIT_NO_PRIORS if FIT_ID == 'fit4' else True,
     'pt_powers': PT_POWERS,
     'data_dir': str(DATA_DIR),
@@ -282,16 +308,40 @@ elif FIT_ID == 'fit5':
         p0={f'd{power}': 0.0 for power in PT_POWERS},
         xerrors=True,
     )
-else:
-    def pt_preserving_interpolation(x, p):
+elif FIT_ID == 'fit6':
+    def two_loop_free_interpolation(x, p):
         u = np.asarray(x) / bf.perturbative_beta_function.nrm
-        correction = 1.0 + sum(p[f'd{power}'][0] * u**power for power in PT_POWERS)
-        return bf.perturbative_beta_function(x, loops=3) * correction
+        pt = bf.perturbative_beta_function
+        fixed_ratio = -pt.b[0] / pt.nrm - pt.b[2] / pt.nrm * u**2
+        ratio = fixed_ratio + p['b1'][0] * u + sum(
+            p[f'd{power}'][0] * u**power for power in PT_POWERS
+        )
+        return np.asarray(x)**2 * ratio
 
     interpolation = betafn.InterpolationSpec(
-        fcn=pt_preserving_interpolation,
-        prior={f'd{power}': [gv.gvar(0, 10)] for power in PT_POWERS},
-        p0={f'd{power}': 0.0 for power in PT_POWERS},
+        fcn=two_loop_free_interpolation,
+        prior={'b1': [gv.gvar(0, 10)], **{
+            f'd{power}': [gv.gvar(0, 10)] for power in PT_POWERS
+        }},
+        p0={'b1': 0.0, **{f'd{power}': 0.0 for power in PT_POWERS}},
+        xerrors=True,
+    )
+else:
+    def three_loop_free_interpolation(x, p):
+        u = np.asarray(x) / bf.perturbative_beta_function.nrm
+        pt = bf.perturbative_beta_function
+        fixed_ratio = -pt.b[0] / pt.nrm - pt.b[1] / pt.nrm * u
+        ratio = fixed_ratio + p['b2'][0] * u**2 + sum(
+            p[f'd{power}'][0] * u**power for power in PT_POWERS
+        )
+        return np.asarray(x)**2 * ratio
+
+    interpolation = betafn.InterpolationSpec(
+        fcn=three_loop_free_interpolation,
+        prior={'b2': [gv.gvar(0, 10)], **{
+            f'd{power}': [gv.gvar(0, 10)] for power in PT_POWERS
+        }},
+        p0={'b2': 0.0, **{f'd{power}': 0.0 for power in PT_POWERS}},
         xerrors=True,
     )
 config = betafn.AnalysisConfig(
@@ -478,7 +528,7 @@ def save_interpolation_diagnostics():
         )
 
 
-if FIT_ID in ('fit4', 'fit5'):
+if FIT_ID in ('fit4', 'fit5', 'fit6', 'fit7'):
     save_interpolation_diagnostics()
 
 
@@ -836,7 +886,10 @@ plt.close(fig)
 def snapshot_case(window, mode):
     payload = {
         'window': window, 'mode': mode, 'fit_id': FIT_ID,
-        'model_tag': MODEL_TAG, 'fit4_order': ORDER, 'pt_powers': PT_POWERS,
+        'model_tag': MODEL_TAG,
+        'fit4_order': ORDER if FIT_ID == 'fit4' else None,
+        'model_order': ORDER,
+        'pt_powers': PT_POWERS,
         'g2s': copy.deepcopy(bf.g2s), 'betas': copy.deepcopy(bf.betas),
         'cnt_fits': copy.deepcopy(bf.cnt_fits), 'cnt_qof': copy.deepcopy(bf.continuum.quality),
         'metadata': copy.deepcopy(bf.continuum.metadata),
@@ -894,7 +947,12 @@ def interpolation_coefficient_items(fit):
     if FIT_ID == 'fit4':
         return [(rf'c_{{{index}}}', fit[f'pt_c{index}'][0])
                 for index in range(1, ORDER + 1)]
-    return [(rf'd_{{{power}}}', fit[f'd{power}'][0]) for power in PT_POWERS]
+    items = [(rf'd_{{{power}}}', fit[f'd{power}'][0]) for power in PT_POWERS]
+    if FIT_ID == 'fit6':
+        return [(r'b_1', fit['b1'][0])] + items
+    if FIT_ID == 'fit7':
+        return [(r'b_2', fit['b2'][0])] + items
+    return items
 
 
 for window in WINDOWS:
@@ -1881,6 +1939,16 @@ def ratio_model(x, p):
           p[f'd{power}'][0] * u**power
           for power in PT_POWERS
       )
+  if FIT_ID == 'fit6':
+      pt = bf.perturbative_beta_function
+      return (-pt.b[0] / pt.nrm + p['b1'][0] * u
+              - pt.b[2] / pt.nrm * u**2
+              + sum(p[f'd{power}'][0] * u**power for power in PT_POWERS))
+  if FIT_ID == 'fit7':
+      pt = bf.perturbative_beta_function
+      return (-pt.b[0] / pt.nrm - pt.b[1] / pt.nrm * u
+              + p['b2'][0] * u**2
+              + sum(p[f'd{power}'][0] * u**power for power in PT_POWERS))
   prefix = 'c' if FIT_ID == 'fit4' else 'd'
   correction = 1.0 + sum(
       p[f'{prefix}{power}'][0] * u**power
@@ -1933,6 +2001,10 @@ for window in WINDOWS:
           f'{prefix}{power}': [gv.gvar(0, 10)]
           for power in PT_POWERS
       }
+      if FIT_ID == 'fit6':
+          prior['b1'] = [gv.gvar(0, 10)]
+      elif FIT_ID == 'fit7':
+          prior['b2'] = [gv.gvar(0, 10)]
 
       # The gvars in y retain the covariance of the correlated continuum
       # calculation. lsqfit therefore uses their full covariance matrix.
