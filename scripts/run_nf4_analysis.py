@@ -127,12 +127,15 @@ elif FIT_ID == 'fit5':
     ORDER = None
     FIT_WIDTH = None
     FIT_NO_PRIORS = False
-    PT_POWERS = (3,)
+    # Keep the complete three-loop GF beta function fixed and allow two
+    # higher-order multiplicative corrections.  In u=g_GF^2/(4*pi), d3 and
+    # d4 have broad N(0, 10^2) priors and are effectively data-determined.
+    PT_POWERS = (3, 4)
     FIT_PRIOR_COUNT = len(PT_POWERS)
     FIT_FOOTER = None
-    MODEL_TAG = 'pt_preserving_u3'
+    MODEL_TAG = 'pt_fixed_two_free_u3_u4'
     OUTPUT_FAMILY = FIT_ID
-    FIT_WATERMARK = r'fit5, PT-preserving order $u^3$'
+    FIT_WATERMARK = r'fit5, fixed 3-loop PT + broad $u^3,u^4$ terms'
 else:
     ORDER = None
     FIT_WIDTH = None
@@ -189,7 +192,7 @@ WINDOWS = tuple(
     for tmax in range(tmin + 1, TMAX_LIMIT + 1)
 )
 CENTRAL_WINDOW = (4.0, 6.0)
-G2_GRID = (0.9, 4.9, 0.2)
+G2_GRID = (0.9, 4.9, 0.1)
 TARGET_G2 = (1.1, 1.3, 1.5, 1.8, 2.2, 2.6, 3.0, 4.0)
 
 def window_tag(window):
@@ -460,7 +463,7 @@ def save_interpolation_diagnostics():
         )
 
 
-if FIT_ID == 'fit4':
+if FIT_ID in ('fit4', 'fit5'):
     save_interpolation_diagnostics()
 
 
