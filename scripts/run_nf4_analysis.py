@@ -126,15 +126,15 @@ elif FIT_ID == 'fit5':
     ORDER = None
     FIT_WIDTH = None
     FIT_NO_PRIORS = False
-    # Keep the complete three-loop GF beta function fixed and allow two
-    # higher-order multiplicative corrections.  In u=g_GF^2/(4*pi), d3 and
-    # d4 have broad N(0, 10^2) priors and are effectively data-determined.
+    # Keep the complete three-loop GF beta-function ratio fixed and add two
+    # higher-order polynomial terms.  In u=g_GF^2/(4*pi), d3 and d4 have
+    # broad N(0, 10^2) priors and are effectively data-determined.
     PT_POWERS = (3, 4)
     FIT_PRIOR_COUNT = len(PT_POWERS)
     FIT_FOOTER = None
-    MODEL_TAG = 'pt_fixed_two_free_u3_u4'
+    MODEL_TAG = 'pt_fixed_additive_u3_u4'
     OUTPUT_FAMILY = FIT_ID
-    FIT_WATERMARK = r'fit5, fixed 3-loop PT + broad $u^3,u^4$ terms'
+    FIT_WATERMARK = r'fit5, fixed 3-loop PT + additive $u^3,u^4$ terms'
 else:
     ORDER = None
     FIT_WIDTH = None
@@ -266,6 +266,22 @@ if FIT_ID == 'fit4':
             loops=3, correction_order=ORDER, free_intercept=False,
             width=FIT_WIDTH, xerrors=True,
         )
+elif FIT_ID == 'fit5':
+    def fixed_pt_additive_interpolation(x, p):
+        x = np.asarray(x)
+        u = x / bf.perturbative_beta_function.nrm
+        higher_order_ratio = sum(
+            p[f'd{power}'][0] * u**power for power in PT_POWERS
+        )
+        return (bf.perturbative_beta_function(x, loops=3)
+                + x**2 * higher_order_ratio)
+
+    interpolation = betafn.InterpolationSpec(
+        fcn=fixed_pt_additive_interpolation,
+        prior={f'd{power}': [gv.gvar(0, 10)] for power in PT_POWERS},
+        p0={f'd{power}': 0.0 for power in PT_POWERS},
+        xerrors=True,
+    )
 else:
     def pt_preserving_interpolation(x, p):
         u = np.asarray(x) / bf.perturbative_beta_function.nrm
@@ -1860,6 +1876,11 @@ for window in WINDOWS:
 
 def ratio_model(x, p):
   u = np.asarray(x) / bf.perturbative_beta_function.nrm
+  if FIT_ID == 'fit5':
+      return pt_over_g4(x, 3) + sum(
+          p[f'd{power}'][0] * u**power
+          for power in PT_POWERS
+      )
   prefix = 'c' if FIT_ID == 'fit4' else 'd'
   correction = 1.0 + sum(
       p[f'{prefix}{power}'][0] * u**power
