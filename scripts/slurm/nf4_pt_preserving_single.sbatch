@@ -8,18 +8,22 @@
 
 set -euo pipefail
 
-: "${NF4_MODEL:?Set NF4_MODEL to fit5, fit6, or fit7.}"
+: "${NF4_MODEL:?Set NF4_MODEL to a supported fit model.}"
 : "${NF4_ORDER:=2}"
 : "${BETAFN_DATA_DIR:?Set BETAFN_DATA_DIR to the HPCC dataset directory.}"
 : "${BETAFN_OUTPUT_BASE:?Set BETAFN_OUTPUT_BASE to an HPCC output directory.}"
 : "${BETAFN_VENV:?Set BETAFN_VENV to the Python virtual-environment directory.}"
 
-if [[ "${NF4_MODEL}" != "fit5" && "${NF4_MODEL}" != "fit6" && "${NF4_MODEL}" != "fit7" ]]; then
-  echo "NF4_MODEL must be fit5, fit6, or fit7; got ${NF4_MODEL}" >&2
+if [[ ! "${NF4_MODEL}" =~ ^fit(5|6|7|8|9|10)$ ]]; then
+  echo "NF4_MODEL must be fit5 through fit10; got ${NF4_MODEL}" >&2
   exit 2
 fi
-if [[ "${NF4_ORDER}" != "1" && "${NF4_ORDER}" != "2" ]]; then
-  echo "NF4_ORDER must be 1 or 2; got ${NF4_ORDER}" >&2
+if [[ "${NF4_MODEL}" =~ ^fit(5|6|7)$ && "${NF4_ORDER}" != "1" && "${NF4_ORDER}" != "2" ]]; then
+  echo "NF4_ORDER must be 1 or 2 for ${NF4_MODEL}; got ${NF4_ORDER}" >&2
+  exit 2
+fi
+if [[ "${NF4_MODEL}" =~ ^fit(8|9|10)$ && "${NF4_ORDER}" != "3" && "${NF4_ORDER}" != "4" ]]; then
+  echo "NF4_ORDER must be 3 or 4 for ${NF4_MODEL}; got ${NF4_ORDER}" >&2
   exit 2
 fi
 
