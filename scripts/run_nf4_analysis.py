@@ -399,6 +399,20 @@ else:
         p0={f'pt_c{power}': 0.0 for power in PT_POWERS},
         xerrors=False,
     )
+
+
+def interpolation_coefficient_specs():
+    """Return plot labels and parameter keys for the active interpolation."""
+    if FIT_ID in ('fit4', 'fit8', 'fit9', 'fit10'):
+        return [(rf'c_{{{power}}}', f'pt_c{power}') for power in PT_POWERS]
+    higher_orders = [(rf'd_{{{power}}}', f'd{power}') for power in PT_POWERS]
+    if FIT_ID == 'fit6':
+        return [(r'b_1', 'b1')] + higher_orders
+    if FIT_ID == 'fit7':
+        return [(r'b_2', 'b2')] + higher_orders
+    return higher_orders
+
+
 config = betafn.AnalysisConfig(
     data_path=str(DATA_DIR),
     interpolation=interpolation,
@@ -422,6 +436,14 @@ config = betafn.AnalysisConfig(
 print(pd.DataFrame([config.describe()]).T.rename(columns={0: f'{FIT_ID} setting'}).to_string())
 if args.validate_only:
     parameter_names = sorted(interpolation.p0)
+    plotted_parameter_names = sorted(
+        parameter_name for _, parameter_name in interpolation_coefficient_specs()
+    )
+    if parameter_names != plotted_parameter_names:
+        raise RuntimeError(
+            'Interpolation/plot parameter mismatch: '
+            f'{parameter_names} versus {plotted_parameter_names}'
+        )
     print(f'validation successful: model={FIT_ID}, tag={MODEL_TAG}, parameters={parameter_names}')
     raise SystemExit(0)
 
@@ -999,18 +1021,8 @@ def select_flow_times(available_times, window, step):
 
 def interpolation_coefficient_items(fit):
     """Return the active model's fitted coefficient labels and values."""
-    if FIT_ID == 'fit4':
-        return [(rf'c_{{{index}}}', fit[f'pt_c{index}'][0])
-                for index in range(1, ORDER + 1)]
-    items = [(rf'd_{{{power}}}', fit[f'd{power}'][0]) for power in PT_POWERS]
-    if FIT_ID == 'fit6':
-        return [(r'b_1', fit['b1'][0])] + items
-    if FIT_ID == 'fit7':
-        return [(r'b_2', fit['b2'][0])] + items
-    if FIT_ID in ('fit8', 'fit9', 'fit10'):
-        return [(rf'c_{{{power}}}', fit[f'pt_c{power}'][0])
-                for power in PT_POWERS]
-    return items
+    return [(label, fit[parameter_name][0])
+            for label, parameter_name in interpolation_coefficient_specs()]
 
 
 for window in WINDOWS:
