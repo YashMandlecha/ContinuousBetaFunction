@@ -73,8 +73,8 @@ with st.expander("Interpolation models and priors", expanded=True):
         )
         st.markdown(
             "Order 1 fits $d_3$; order 2 fits $d_3,d_4$. Every fitted "
-            "coefficient has the broad independent prior "
-            r"$d_k\sim\mathcal N(0,10^2)$. Both variants use `xerrors=True`."
+            "coefficient is unconstrained: there are no coefficient priors, "
+            "and both variants use `xerrors=False`."
         )
     with fit6_tab:
         st.markdown("**One- and three-loop coefficients fixed; two-loop coefficient free**")
@@ -85,8 +85,9 @@ with st.expander("Interpolation models and priors", expanded=True):
         st.markdown(
             "$A_0$ and $A_2$ are fixed at their perturbative values. The "
             "normalized two-loop coefficient $b_1$ and each included $d_k$ "
-            r"have independent $\mathcal N(0,10^2)$ priors. Order 1 fits "
-            "$b_1,d_3$; order 2 fits $b_1,d_3,d_4$. `xerrors=True`."
+            "are unconstrained. Order 1 fits $b_1,d_3$; order 2 fits "
+            "$b_1,d_3,d_4$. There are no coefficient priors and "
+            "`xerrors=False`."
         )
     with fit7_tab:
         st.markdown("**One- and two-loop coefficients fixed; three-loop coefficient free**")
@@ -97,14 +98,15 @@ with st.expander("Interpolation models and priors", expanded=True):
         st.markdown(
             "$A_0$ and $A_1$ are fixed at their perturbative values. The "
             "normalized three-loop coefficient $b_2$ and each included $d_k$ "
-            r"have independent $\mathcal N(0,10^2)$ priors. Order 1 fits "
-            "$b_2,d_3$; order 2 fits $b_2,d_3,d_4$. `xerrors=True`."
+            "are unconstrained. Order 1 fits $b_2,d_3$; order 2 fits "
+            "$b_2,d_3,d_4$. There are no coefficient priors and "
+            "`xerrors=False`."
         )
     with fit8_tab:
-        st.markdown("**Multiplicative fit with $c_1$ fixed to one**")
+        st.markdown("**Multiplicative fit with $c_1$ fixed to zero**")
         st.latex(
             r"\beta(x)=\beta_{\rm PT}^{(3)}(x)"
-            r"\left[1+u+\sum_{n=2}^{N}c_nu^n\right],\qquad N\in\{3,4\}"
+            r"\left[1+\sum_{n=2}^{N}c_nu^n\right],\qquad c_1=0,\quad N\in\{3,4\}"
         )
         st.markdown(
             "Order 3 fits $c_2,c_3$; order 4 fits $c_2,c_3,c_4$. "
@@ -112,11 +114,11 @@ with st.expander("Interpolation models and priors", expanded=True):
             "and `xerrors=False`."
         )
     with fit9_tab:
-        st.markdown("**Multiplicative fit with $c_2$ fixed to one**")
+        st.markdown("**Multiplicative fit with $c_2$ fixed to zero**")
         st.latex(
             r"\beta(x)=\beta_{\rm PT}^{(3)}(x)"
-            r"\left[1+c_1u+u^2+\sum_{n=3}^{N}c_nu^n\right],"
-            r"\qquad N\in\{3,4\}"
+            r"\left[1+c_1u+\sum_{n=3}^{N}c_nu^n\right],"
+            r"\qquad c_2=0,\quad N\in\{3,4\}"
         )
         st.markdown(
             "Order 3 fits $c_1,c_3$; order 4 fits $c_1,c_3,c_4$. "
@@ -124,11 +126,11 @@ with st.expander("Interpolation models and priors", expanded=True):
             "and `xerrors=False`."
         )
     with fit10_tab:
-        st.markdown("**Free multiplicative intercept with $c_1=c_2=1$**")
+        st.markdown("**Free multiplicative intercept with $c_1=c_2=0$**")
         st.latex(
             r"\beta(x)=\beta_{\rm PT}^{(3)}(x)"
-            r"\left[c_0+u+u^2+\sum_{n=3}^{N}c_nu^n\right],"
-            r"\qquad N\in\{3,4\}"
+            r"\left[c_0+\sum_{n=3}^{N}c_nu^n\right],"
+            r"\qquad c_1=c_2=0,\quad N\in\{3,4\}"
         )
         st.markdown(
             "Order 3 fits $c_0,c_3$; order 4 fits $c_0,c_3,c_4$. "
@@ -145,8 +147,8 @@ with st.expander("Interpolation models and priors", expanded=True):
         "In the normalized-u notation, A₀ = −0.0527714498137, "
         "A₁ = −0.0258684182433, and A₂ = 0.145164910733. "
         "The symbols b₁ and b₂ above denote fitted normalized-u coefficients, "
-        "not additional fixed perturbative constants. All Gaussian priors are "
-        "sign-symmetric, so the fitted coefficients may be positive or negative."
+        "not additional fixed perturbative constants. Fits 5–10 use no "
+        "coefficient priors, so their free coefficients may take either sign."
     )
     st.markdown(
         "**Common analysis settings:** continuum points use the 41-value grid "
@@ -157,18 +159,18 @@ with st.expander("Interpolation models and priors", expanded=True):
     st.markdown(
         "| Variant | Output model tag | Fitted parameters |\n"
         "|---|---|---|\n"
-        "| fit5 order 1 | `pt_fixed_additive_u3` | $d_3$ |\n"
-        "| fit5 order 2 | `pt_fixed_additive_u3_u4` | $d_3,d_4$ |\n"
-        "| fit6 order 1 | `two_loop_free_additive_u3` | $b_1,d_3$ |\n"
-        "| fit6 order 2 | `two_loop_free_additive_u3_u4` | $b_1,d_3,d_4$ |\n"
-        "| fit7 order 1 | `three_loop_free_additive_u3` | $b_2,d_3$ |\n"
-        "| fit7 order 2 | `three_loop_free_additive_u3_u4` | $b_2,d_3,d_4$ |\n"
-        "| fit8 order 3 | `order_3_c1_fixed_1` | $c_2,c_3$ |\n"
-        "| fit8 order 4 | `order_4_c1_fixed_1` | $c_2,c_3,c_4$ |\n"
-        "| fit9 order 3 | `order_3_c2_fixed_1` | $c_1,c_3$ |\n"
-        "| fit9 order 4 | `order_4_c2_fixed_1` | $c_1,c_3,c_4$ |\n"
-        "| fit10 order 3 | `order_3_c1_c2_fixed_1_free_c0` | $c_0,c_3$ |\n"
-        "| fit10 order 4 | `order_4_c1_c2_fixed_1_free_c0` | $c_0,c_3,c_4$ |"
+        "| fit5 order 1 | `pt_fixed_additive_u3_nopriors` | $d_3$ |\n"
+        "| fit5 order 2 | `pt_fixed_additive_u3_u4_nopriors` | $d_3,d_4$ |\n"
+        "| fit6 order 1 | `two_loop_free_additive_u3_nopriors` | $b_1,d_3$ |\n"
+        "| fit6 order 2 | `two_loop_free_additive_u3_u4_nopriors` | $b_1,d_3,d_4$ |\n"
+        "| fit7 order 1 | `three_loop_free_additive_u3_nopriors` | $b_2,d_3$ |\n"
+        "| fit7 order 2 | `three_loop_free_additive_u3_u4_nopriors` | $b_2,d_3,d_4$ |\n"
+        "| fit8 order 3 | `order_3_c1_fixed_0` | $c_2,c_3$ |\n"
+        "| fit8 order 4 | `order_4_c1_fixed_0` | $c_2,c_3,c_4$ |\n"
+        "| fit9 order 3 | `order_3_c2_fixed_0` | $c_1,c_3$ |\n"
+        "| fit9 order 4 | `order_4_c2_fixed_0` | $c_1,c_3,c_4$ |\n"
+        "| fit10 order 3 | `order_3_c1_c2_fixed_0_free_c0` | $c_0,c_3$ |\n"
+        "| fit10 order 4 | `order_4_c1_c2_fixed_0_free_c0` | $c_0,c_3,c_4$ |"
     )
 
 

@@ -110,6 +110,7 @@ if args.latex:
 FIT_ID = args.model
 CORRECTION = args.correction
 DATA_DIR = args.data_dir.expanduser().resolve()
+FIXED_CORRECTION_COEFFICIENTS = {}
 plt.rcParams['text.usetex'] = args.latex
 if args.latex:
     plt.rcParams.update({
@@ -139,43 +140,45 @@ if FIT_ID == 'fit4':
 elif FIT_ID == 'fit5':
     ORDER = args.fit5_order
     FIT_WIDTH = None
-    FIT_NO_PRIORS = False
+    FIT_NO_PRIORS = True
     # Keep the complete three-loop GF beta-function ratio fixed and add one
     # or two higher-order polynomial terms.  In u=g_GF^2/(4*pi), these terms
-    # have broad N(0, 10^2) priors and are effectively data-determined.
+    # are fitted without coefficient priors.
     PT_POWERS = tuple(range(3, 3 + ORDER))
-    FIT_PRIOR_COUNT = len(PT_POWERS)
-    FIT_FOOTER = None
-    MODEL_TAG = 'pt_fixed_additive_' + '_'.join(f'u{power}' for power in PT_POWERS)
+    FIT_PRIOR_COUNT = 0
+    FIT_FOOTER = 'no coefficient priors, xerrors=False'
+    MODEL_TAG = ('pt_fixed_additive_' + '_'.join(
+        f'u{power}' for power in PT_POWERS
+    ) + '_nopriors')
     OUTPUT_FAMILY = FIT_ID
     powers_label = '+'.join(f'u^{power}' for power in PT_POWERS)
-    FIT_WATERMARK = rf'fit5, fixed 3-loop PT + additive ${powers_label}$'
+    FIT_WATERMARK = rf'fit5, fixed 3-loop PT + additive ${powers_label}$, no priors'
 elif FIT_ID == 'fit6':
     ORDER = args.fit6_order
     FIT_WIDTH = None
-    FIT_NO_PRIORS = False
+    FIT_NO_PRIORS = True
     PT_POWERS = tuple(range(3, 3 + ORDER))
-    FIT_PRIOR_COUNT = 1 + len(PT_POWERS)
-    FIT_FOOTER = None
+    FIT_PRIOR_COUNT = 0
+    FIT_FOOTER = 'no coefficient priors, xerrors=False'
     MODEL_TAG = 'two_loop_free_additive_' + '_'.join(
         f'u{power}' for power in PT_POWERS
-    )
+    ) + '_nopriors'
     OUTPUT_FAMILY = FIT_ID
     powers_label = '+'.join(f'u^{power}' for power in PT_POWERS)
-    FIT_WATERMARK = rf'fit6, free 2-loop coefficient + ${powers_label}$'
+    FIT_WATERMARK = rf'fit6, free 2-loop coefficient + ${powers_label}$, no priors'
 elif FIT_ID == 'fit7':
     ORDER = args.fit7_order
     FIT_WIDTH = None
-    FIT_NO_PRIORS = False
+    FIT_NO_PRIORS = True
     PT_POWERS = tuple(range(3, 3 + ORDER))
-    FIT_PRIOR_COUNT = 1 + len(PT_POWERS)
-    FIT_FOOTER = None
+    FIT_PRIOR_COUNT = 0
+    FIT_FOOTER = 'no coefficient priors, xerrors=False'
     MODEL_TAG = 'three_loop_free_additive_' + '_'.join(
         f'u{power}' for power in PT_POWERS
-    )
+    ) + '_nopriors'
     OUTPUT_FAMILY = FIT_ID
     powers_label = '+'.join(f'u^{power}' for power in PT_POWERS)
-    FIT_WATERMARK = rf'fit7, free 3-loop coefficient + ${powers_label}$'
+    FIT_WATERMARK = rf'fit7, free 3-loop coefficient + ${powers_label}$, no priors'
 else:
     ORDER = getattr(args, f'{FIT_ID}_order')
     FIT_WIDTH = None
@@ -184,20 +187,23 @@ else:
     FIT_FOOTER = 'no coefficient priors, xerrors=False'
     OUTPUT_FAMILY = FIT_ID
     if FIT_ID == 'fit8':
-        # beta = beta_PT3 [1 + u + c2 u^2 + ... + cN u^N]
+        # beta = beta_PT3 [1 + c2 u^2 + ... + cN u^N], with c1=0.
         PT_POWERS = tuple(range(2, ORDER + 1))
-        MODEL_TAG = f'order_{ORDER}_c1_fixed_1'
-        FIT_WATERMARK = rf'fit8, order {ORDER}, $c_1=1$, no priors'
+        FIXED_CORRECTION_COEFFICIENTS = {0: 1.0, 1: 0.0}
+        MODEL_TAG = f'order_{ORDER}_c1_fixed_0'
+        FIT_WATERMARK = rf'fit8, order {ORDER}, $c_1=0$, no priors'
     elif FIT_ID == 'fit9':
-        # beta = beta_PT3 [1 + c1 u + u^2 + c3 u^3 + ... + cN u^N]
+        # beta = beta_PT3 [1 + c1 u + c3 u^3 + ... + cN u^N], with c2=0.
         PT_POWERS = (1,) + tuple(range(3, ORDER + 1))
-        MODEL_TAG = f'order_{ORDER}_c2_fixed_1'
-        FIT_WATERMARK = rf'fit9, order {ORDER}, $c_2=1$, no priors'
+        FIXED_CORRECTION_COEFFICIENTS = {0: 1.0, 2: 0.0}
+        MODEL_TAG = f'order_{ORDER}_c2_fixed_0'
+        FIT_WATERMARK = rf'fit9, order {ORDER}, $c_2=0$, no priors'
     else:
-        # beta = beta_PT3 [c0 + u + u^2 + c3 u^3 + ... + cN u^N]
+        # beta = beta_PT3 [c0 + c3 u^3 + ... + cN u^N], with c1=c2=0.
         PT_POWERS = (0,) + tuple(range(3, ORDER + 1))
-        MODEL_TAG = f'order_{ORDER}_c1_c2_fixed_1_free_c0'
-        FIT_WATERMARK = rf'fit10, order {ORDER}, free $c_0$, $c_1=c_2=1$, no priors'
+        FIXED_CORRECTION_COEFFICIENTS = {1: 0.0, 2: 0.0}
+        MODEL_TAG = f'order_{ORDER}_c1_c2_fixed_0_free_c0'
+        FIT_WATERMARK = rf'fit10, order {ORDER}, free $c_0$, $c_1=c_2=0$, no priors'
 
 OUTPUT_ROOT = args.output_base.expanduser().resolve() / OUTPUT_FAMILY / MODEL_TAG
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
@@ -214,9 +220,9 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     'fit8_order': args.fit8_order if FIT_ID == 'fit8' else None,
     'fit9_order': args.fit9_order if FIT_ID == 'fit9' else None,
     'fit10_order': args.fit10_order if FIT_ID == 'fit10' else None,
-    'interpolation_xerrors': False if FIT_ID in ('fit8', 'fit9', 'fit10')
-                            else (not FIT_NO_PRIORS if FIT_ID == 'fit4' else True),
+    'interpolation_xerrors': not FIT_NO_PRIORS,
     'pt_powers': PT_POWERS,
+    'fixed_correction_coefficients': FIXED_CORRECTION_COEFFICIENTS,
     'data_dir': str(DATA_DIR),
     'output_root': str(OUTPUT_ROOT),
     'correction': CORRECTION,
@@ -305,6 +311,19 @@ if not DATA_DIR.is_dir():
     raise FileNotFoundError(DATA_DIR)
 
 bf = betafn.BetaFunction(nf=4)
+
+
+def selected_multiplicative_correction(u, parameters, prefix):
+    """Evaluate the fit8--fit10 correction from one authoritative mapping."""
+    correction = sum(
+        coefficient * u**power
+        for power, coefficient in FIXED_CORRECTION_COEFFICIENTS.items()
+    )
+    return correction + sum(
+        parameters[f'{prefix}{power}'][0] * u**power for power in PT_POWERS
+    )
+
+
 if FIT_ID == 'fit4':
     if FIT_NO_PRIORS:
         def prior_free_interpolation(x, p):
@@ -319,7 +338,7 @@ if FIT_ID == 'fit4':
         interpolation = betafn.InterpolationSpec(
             fcn=prior_free_interpolation,
             prior=None,
-            p0={f'pt_c{index}': 0.0 for index in range(1, ORDER + 1)},
+            p0={f'pt_c{index}': [0.0] for index in range(1, ORDER + 1)},
             xerrors=False,
         )
     else:
@@ -339,9 +358,9 @@ elif FIT_ID == 'fit5':
 
     interpolation = betafn.InterpolationSpec(
         fcn=fixed_pt_additive_interpolation,
-        prior={f'd{power}': [gv.gvar(0, 10)] for power in PT_POWERS},
-        p0={f'd{power}': 0.0 for power in PT_POWERS},
-        xerrors=True,
+        prior=None,
+        p0={f'd{power}': [0.0] for power in PT_POWERS},
+        xerrors=False,
     )
 elif FIT_ID == 'fit6':
     def two_loop_free_interpolation(x, p):
@@ -355,11 +374,9 @@ elif FIT_ID == 'fit6':
 
     interpolation = betafn.InterpolationSpec(
         fcn=two_loop_free_interpolation,
-        prior={'b1': [gv.gvar(0, 10)], **{
-            f'd{power}': [gv.gvar(0, 10)] for power in PT_POWERS
-        }},
-        p0={'b1': 0.0, **{f'd{power}': 0.0 for power in PT_POWERS}},
-        xerrors=True,
+        prior=None,
+        p0={'b1': [0.0], **{f'd{power}': [0.0] for power in PT_POWERS}},
+        xerrors=False,
     )
 elif FIT_ID == 'fit7':
     def three_loop_free_interpolation(x, p):
@@ -373,30 +390,20 @@ elif FIT_ID == 'fit7':
 
     interpolation = betafn.InterpolationSpec(
         fcn=three_loop_free_interpolation,
-        prior={'b2': [gv.gvar(0, 10)], **{
-            f'd{power}': [gv.gvar(0, 10)] for power in PT_POWERS
-        }},
-        p0={'b2': 0.0, **{f'd{power}': 0.0 for power in PT_POWERS}},
-        xerrors=True,
+        prior=None,
+        p0={'b2': [0.0], **{f'd{power}': [0.0] for power in PT_POWERS}},
+        xerrors=False,
     )
 else:
     def fixed_multiplicative_interpolation(x, p):
         u = np.asarray(x) / bf.perturbative_beta_function.nrm
-        if FIT_ID == 'fit8':
-            correction = 1.0 + u
-        elif FIT_ID == 'fit9':
-            correction = 1.0 + u**2
-        else:
-            correction = u + u**2
-        correction = correction + sum(
-            p[f'pt_c{power}'][0] * u**power for power in PT_POWERS
-        )
+        correction = selected_multiplicative_correction(u, p, 'pt_c')
         return bf.perturbative_beta_function(x, loops=3) * correction
 
     interpolation = betafn.InterpolationSpec(
         fcn=fixed_multiplicative_interpolation,
         prior=None,
-        p0={f'pt_c{power}': 0.0 for power in PT_POWERS},
+        p0={f'pt_c{power}': [0.0] for power in PT_POWERS},
         xerrors=False,
     )
 
@@ -444,6 +451,106 @@ if args.validate_only:
             'Interpolation/plot parameter mismatch: '
             f'{parameter_names} versus {plotted_parameter_names}'
         )
+    if FIT_ID in ('fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10'):
+        if interpolation.prior is not None or interpolation.xerrors:
+            raise RuntimeError(
+                f'{FIT_ID} must have prior=None and xerrors=False; got '
+                f'prior={interpolation.prior}, xerrors={interpolation.xerrors}'
+            )
+    test_u = np.asarray([0.125, 0.375])
+    test_x = test_u * bf.perturbative_beta_function.nrm
+    test_parameters = {
+        name: [0.25 * (index + 1)]
+        for index, name in enumerate(parameter_names)
+    }
+    if FIT_ID == 'fit5':
+        expected_beta = bf.perturbative_beta_function(test_x, loops=3) + test_x**2 * sum(
+            test_parameters[f'd{power}'][0] * test_u**power for power in PT_POWERS
+        )
+        np.testing.assert_allclose(
+            interpolation.fcn(test_x, test_parameters), expected_beta,
+            rtol=1e-13, atol=1e-13,
+        )
+    elif FIT_ID == 'fit6':
+        pt = bf.perturbative_beta_function
+        expected_ratio = (
+            -pt.b[0] / pt.nrm
+            + test_parameters['b1'][0] * test_u
+            - pt.b[2] / pt.nrm * test_u**2
+            + sum(test_parameters[f'd{power}'][0] * test_u**power
+                  for power in PT_POWERS)
+        )
+        np.testing.assert_allclose(
+            interpolation.fcn(test_x, test_parameters), test_x**2 * expected_ratio,
+            rtol=1e-13, atol=1e-13,
+        )
+    elif FIT_ID == 'fit7':
+        pt = bf.perturbative_beta_function
+        expected_ratio = (
+            -pt.b[0] / pt.nrm
+            - pt.b[1] / pt.nrm * test_u
+            + test_parameters['b2'][0] * test_u**2
+            + sum(test_parameters[f'd{power}'][0] * test_u**power
+                  for power in PT_POWERS)
+        )
+        np.testing.assert_allclose(
+            interpolation.fcn(test_x, test_parameters), test_x**2 * expected_ratio,
+            rtol=1e-13, atol=1e-13,
+        )
+    expected_fixed_coefficients = {
+        'fit8': {0: 1.0, 1: 0.0},
+        'fit9': {0: 1.0, 2: 0.0},
+        'fit10': {1: 0.0, 2: 0.0},
+    }
+    if FIT_ID in expected_fixed_coefficients:
+        if FIXED_CORRECTION_COEFFICIENTS != expected_fixed_coefficients[FIT_ID]:
+            raise RuntimeError(
+                f'{FIT_ID} fixed-coefficient mismatch: '
+                f'{FIXED_CORRECTION_COEFFICIENTS}'
+            )
+        expected_correction = sum(
+            coefficient * test_u**power
+            for power, coefficient in FIXED_CORRECTION_COEFFICIENTS.items()
+        ) + sum(
+            test_parameters[f'pt_c{power}'][0] * test_u**power
+            for power in PT_POWERS
+        )
+        observed_correction = (
+            interpolation.fcn(test_x, test_parameters)
+            / bf.perturbative_beta_function(test_x, loops=3)
+        )
+        np.testing.assert_allclose(
+            observed_correction, expected_correction, rtol=1e-13, atol=1e-13
+        )
+    # Exercise the same no-prior lsqfit call and one-element parameter shapes
+    # used by the production interpolation stage.  This catches failures that
+    # constructing an InterpolationSpec alone cannot reveal.
+    if FIT_NO_PRIORS:
+        smoke_x = np.linspace(0.8, 8.0, 40)
+        smoke_parameters = {
+            name: [0.1 / (index + 1)]
+            for index, name in enumerate(parameter_names)
+        }
+        smoke_mean = np.asarray(
+            interpolation.fcn(smoke_x, smoke_parameters), dtype=float
+        )
+        smoke_y = gv.gvar(smoke_mean, np.full(smoke_mean.shape, 1e-6))
+        smoke_fit = lsqfit.nonlinear_fit(
+            data=(smoke_x, smoke_y),
+            fcn=interpolation.fcn,
+            prior=interpolation.prior,
+            p0=interpolation.p0,
+        )
+        if sorted(smoke_fit.p) != parameter_names:
+            raise RuntimeError(
+                'Smoke-fit parameter mismatch: '
+                f'{sorted(smoke_fit.p)} versus {parameter_names}'
+            )
+        smoke_prediction = np.asarray(
+            gv.mean(interpolation.fcn(smoke_x, smoke_fit.p)), dtype=float
+        )
+        if not np.all(np.isfinite(smoke_prediction)) or not np.isfinite(smoke_fit.chi2):
+            raise RuntimeError('No-prior interpolation smoke fit produced non-finite values.')
     print(f'validation successful: model={FIT_ID}, tag={MODEL_TAG}, parameters={parameter_names}')
     raise SystemExit(0)
 
@@ -2020,15 +2127,7 @@ def ratio_model(x, p):
               + p['b2'][0] * u**2
               + sum(p[f'd{power}'][0] * u**power for power in PT_POWERS))
   if FIT_ID in ('fit8', 'fit9', 'fit10'):
-      if FIT_ID == 'fit8':
-          correction = 1.0 + u
-      elif FIT_ID == 'fit9':
-          correction = 1.0 + u**2
-      else:
-          correction = u + u**2
-      correction = correction + sum(
-          p[f'c{power}'][0] * u**power for power in PT_POWERS
-      )
+      correction = selected_multiplicative_correction(u, p, 'c')
       return pt_over_g4(x, 3) * correction
   prefix = 'c' if FIT_ID == 'fit4' else 'd'
   correction = 1.0 + sum(
@@ -2090,7 +2189,7 @@ for window in WINDOWS:
       # The gvars in y retain the covariance of the correlated continuum
       # calculation. lsqfit therefore uses their full covariance matrix.
       fit_kwargs = dict(data=(x, y), fcn=ratio_model)
-      if FIT_ID in ('fit8', 'fit9', 'fit10'):
+      if FIT_NO_PRIORS:
           fit_kwargs['p0'] = parameters
       else:
           fit_kwargs['prior'] = {
