@@ -5,8 +5,13 @@ from __future__ import annotations
 import numpy as np
 import gvar as gv
 import matplotlib.pyplot as plt
+import pandas as pd
 
-from .weak_coupling import continuum_from_extended_interpolants, figure11_integral_match
+from .weak_coupling import (
+    continuum_from_extended_interpolants,
+    figure11_integral_match,
+    lambda_parameter_from_matched_beta,
+)
 
 
 def run_reviewed_weak_coupling_plots(
@@ -131,6 +136,125 @@ def run_reviewed_weak_coupling_plots(
                     f"extended_interpolation_continuum_to_zero_{fit_id}",
                     "correlated_diagnostic")
     return {"figure11": figure11_results, "direct": direct_results}
+
+
+def run_lambda_parameter_plots(
+    *, bf, flow, observables, windows, fit_id, fit_footer, op_colors,
+    op_labels, window_tag, load_case, figure11_results, output_root,
+):
+    """Write the per-window Lambda table and GF/MSbar summary figure."""
+    nc = 3
+    g2_t0 = 0.3 * 128.0 * np.pi**2 / (3.0 * nc**2 - 3.0)
+    lambda_results = {}
+    rows = []
+
+    for window in windows:
+        case = load_case(window, "correlated")
+        lambda_results[window] = {}
+        for operator in observables:
+            x = np.asarray(case["g2s"][flow][operator], dtype=float)
+            y = np.asarray(case["betas"][flow][operator], dtype=object) / x**2
+            order = np.argsort(x)
+            x, y = x[order], y[order]
+
+            available_g2_max = float(x[-1])
+            reference_g2 = min(g2_t0, available_g2_max)
+            at_t0 = bool(available_g2_max >= g2_t0)
+            reference_scale = "t0" if at_t0 else "t_star"
+
+            estimate = lambda_parameter_from_matched_beta(
+                x,
+                y,
+                figure11_results[window][operator],
+                bf.perturbative_beta_function,
+                reference_g2=reference_g2,
+            )
+            lambda_results[window][operator] = estimate
+
+            conversion = estimate["lambda_msbar_over_lambda_gf"]
+            for label in ("central", "plus_sigma", "minus_sigma"):
+                np.testing.assert_allclose(
+                    estimate["lambda_msbar_over_mu"][label],
+                    conversion * estimate["lambda_gf_over_mu"][label],
+                    rtol=1e-13,
+                    atol=0.0,
+                )
+
+            row = {
+                "window": window_tag(window),
+                "operator": operator,
+                "operator_label": op_labels[operator],
+                "reference_scale": reference_scale,
+                "g2_reference": reference_g2,
+                "g2_supported_max": available_g2_max,
+                "g2_t0": g2_t0,
+                "reaches_t0": at_t0,
+                "lambda_msbar_over_lambda_gf": conversion,
+            }
+            for scheme, values in (
+                ("GF", estimate["lambda_gf_over_mu"]),
+                ("MSbar", estimate["lambda_msbar_over_mu"]),
+            ):
+                central = values["central"]
+                envelope_low = min(values["plus_sigma"], values["minus_sigma"])
+                envelope_high = max(values["plus_sigma"], values["minus_sigma"])
+                row[f"sqrt8tref_lambda_{scheme}_central"] = central
+                row[f"sqrt8tref_lambda_{scheme}_envelope_low"] = envelope_low
+                row[f"sqrt8tref_lambda_{scheme}_envelope_high"] = envelope_high
+            rows.append(row)
+
+    table = pd.DataFrame(rows)
+    table.to_csv(
+        output_root / f"lambda_parameter_by_window_{fit_id}.csv", index=False
+    )
+    print(table.to_string(index=False))
+
+    window_keys = [window_tag(window) for window in windows]
+    window_labels = [key.replace("t_", "").replace("_", "-") for key in window_keys]
+    fig, axes = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+    for ax, scheme, ylabel in (
+        (axes[0], "GF", r"$\sqrt{8t_{\rm ref}}\,\Lambda_{\rm GF}$"),
+        (axes[1], "MSbar", r"$\sqrt{8t_{\rm ref}}\,\Lambda_{\overline{\rm MS}}$"),
+    ):
+        for offset, operator in zip((-0.18, 0.0, 0.18), observables):
+            subset = table.query("operator == @operator").set_index("window").loc[
+                window_keys
+            ]
+            central = subset[f"sqrt8tref_lambda_{scheme}_central"].to_numpy()
+            lower = subset[f"sqrt8tref_lambda_{scheme}_envelope_low"].to_numpy()
+            upper = subset[f"sqrt8tref_lambda_{scheme}_envelope_high"].to_numpy()
+            ax.errorbar(
+                np.arange(len(windows)) + offset,
+                central,
+                yerr=np.vstack((central - lower, upper - central)),
+                fmt="o",
+                capsize=3,
+                color=op_colors[operator],
+                label=op_labels[operator],
+            )
+        ax.set_ylabel(ylabel)
+        ax.legend(frameon=False, ncol=3)
+
+    axes[1].set_xticks(
+        np.arange(len(windows)), window_labels, rotation=45, ha="right"
+    )
+    axes[1].set_xlabel(r"flow-time window $t/a^2$")
+    fig.suptitle(
+        rf"{fit_id}: interim $\Lambda$ estimates; "
+        r"$g^2_{\rm ref}=g^2_{\rm GF}(t_{\rm ref})$ is tabulated separately"
+    )
+    fig.tight_layout()
+    if fit_footer is not None:
+        fig.text(
+            0.995, 0.005, fit_footer, ha="right", va="bottom",
+            fontsize=8, color="gray", alpha=.75,
+        )
+    base = output_root / f"lambda_parameter_by_window_{fit_id}"
+    fig.savefig(base.with_suffix(".png"), dpi=300, bbox_inches="tight")
+    fig.savefig(base.with_suffix(".pdf"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+    return {"table": table, "estimates": lambda_results, "g2_t0": g2_t0}
 
 
 def _add_pt_curves(ax, x, pt_over_g4):

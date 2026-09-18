@@ -31,6 +31,13 @@ class PerturbativeBetaFunction:
         e2 = e20 + (2.0 * b0 * e10 + b1) * log_factor + (b0 * log_factor) * (b0 * log_factor)
         b2 = b2 - e1 * b1 + (e2 - e1 * e1) * b0
 
+        # The one-loop GF--MSbar coupling relation fixes the exact ratio of
+        # Lambda parameters at mu=1/sqrt(8t):
+        # Lambda_MSbar / Lambda_GF = exp[-e1/(2 b0)].
+        self.msbar_b0 = b0
+        self.gf_msbar_one_loop_coefficient = e1
+        self.lambda_msbar_over_lambda_gf = _numpy.exp(-e1 / (2.0 * b0))
+
         self.nrm = 4.0 * _numpy.pi
         self.b = [coef / self.nrm ** (order + 1) for order, coef in enumerate([b0, b1, b2])]
 

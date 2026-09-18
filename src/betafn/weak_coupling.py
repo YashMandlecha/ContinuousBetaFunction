@@ -118,6 +118,141 @@ def figure11_integral_match(
     }
 
 
+def lambda_parameter_from_matched_beta(
+    g2,
+    beta_over_g4,
+    matched_result,
+    perturbative_beta_function,
+    reference_g2=None,
+):
+    """Evaluate Eq. (2) of Phys. Rev. D 108, 014502.
+
+    Below the lower edge of the Figure-11 matching window this uses the
+    matched four-loop-like curve.  Above that edge it uses a shape-preserving
+    interpolation of the domain-supported continuum beta function.  The
+    central and pointwise +/-1 sigma curves are evaluated separately, exactly
+    as in the matching diagnostic.
+
+    The returned GF and MSbar quantities are ``Lambda / mu_ref``.  With the
+    gradient-flow convention ``mu_ref = 1/sqrt(8 t_ref)``, these are
+    ``sqrt(8 t_ref) Lambda``.  A result can therefore be called a t0 result
+    only when ``reference_g2`` equals the coupling defining t0.
+    """
+    g2 = np.asarray(g2, dtype=float)
+    ratio = np.asarray(beta_over_g4, dtype=object)
+    if len(g2) != len(ratio) or len(g2) < 2:
+        raise ValueError("g2 and beta_over_g4 must have the same nontrivial length")
+    order = np.argsort(g2)
+    g2, ratio = g2[order], ratio[order]
+    if np.any(np.diff(g2) <= 0.0):
+        raise ValueError("g2 values must be distinct")
+
+    switch_g2 = float(matched_result["match_window"][0])
+    if reference_g2 is None:
+        reference_g2 = float(g2[-1])
+    reference_g2 = float(reference_g2)
+    endpoint_tolerance = 32.0 * np.finfo(float).eps * max(1.0, abs(g2[-1]))
+    if reference_g2 > g2[-1] and reference_g2 <= g2[-1] + endpoint_tolerance:
+        reference_g2 = float(g2[-1])
+    if not switch_g2 < reference_g2 <= g2[-1]:
+        raise ValueError(
+            f"reference_g2={reference_g2:g} must lie in "
+            f"({switch_g2:g}, {g2[-1]:g}]"
+        )
+
+    match_g2 = np.asarray(matched_result["continuum_g2"], dtype=float)
+    match_ratio = np.asarray(matched_result["continuum_ratio"], dtype=object)
+    match_order = np.argsort(match_g2)
+    match_g2, match_ratio = match_g2[match_order], match_ratio[match_order]
+    if match_g2[0] > switch_g2 or match_g2[-1] < switch_g2:
+        raise ValueError("matched continuum does not cover the switching coupling")
+
+    # Retain the dedicated domain-supported matching segment through its upper
+    # endpoint, then append the ordinary continuum points above it.
+    match_upper = float(matched_result["match_window"][1])
+    low_mask = match_g2 <= match_upper
+    high_mask = (g2 > match_upper) & (g2 <= reference_g2)
+    combined_g2 = np.concatenate((match_g2[low_mask], g2[high_mask]))
+    if combined_g2[-1] < reference_g2:
+        combined_g2 = np.append(combined_g2, reference_g2)
+
+    pt = perturbative_beta_function
+    b0 = float(pt.b[0] / pt.nrm)
+    b1 = float(pt.b[1] / pt.nrm**2)
+    b2 = float(pt.b[2] / pt.nrm**3)
+    if min(b0, b1) <= 0.0:
+        raise ValueError("the Lambda construction requires asymptotic freedom")
+
+    def shifted(values, label):
+        means, sdevs = gv.mean(values), gv.sdev(values)
+        if label == "plus_sigma":
+            return means + sdevs
+        if label == "minus_sigma":
+            return means - sdevs
+        return means
+
+    lambda_gf = {}
+    integrals = {}
+    for label in ("central", "plus_sigma", "minus_sigma"):
+        low_values = shifted(match_ratio[low_mask], label)
+        high_values = shifted(ratio[high_mask], label)
+        combined_ratio = np.concatenate((low_values, high_values))
+        if combined_g2[-1] == reference_g2 and len(combined_ratio) < len(combined_g2):
+            continuum_interp = _shape_preserving_interpolant(
+                g2, shifted(ratio, label)
+            )
+            combined_ratio = np.append(combined_ratio, continuum_interp(reference_g2))
+        ratio_interp = _shape_preserving_interpolant(combined_g2, combined_ratio)
+
+        b_p = float(matched_result["coefficients"][label])
+
+        # Algebraically cancel the 1/x^2 and 1/x singularities in Eq. (2)
+        # for the polynomial weak-coupling curve before numerical integration.
+        def weak_regular_integrand(x):
+            polynomial = b0 + b1*x + b2*x*x + b_p*x**3
+            return (
+                -b1 * (b1 + b2*x + b_p*x*x) / (b0*b0*polynomial)
+                + (b2 + b_p*x) / (b0*polynomial)
+            )
+
+        def continuum_regular_integrand(x):
+            beta = x*x*float(ratio_interp(x))
+            return 1.0/beta + 1.0/(b0*x*x) - b1/(b0*b0*x)
+
+        weak_integral, _ = quad(
+            weak_regular_integrand, 0.0, switch_g2,
+            epsabs=1e-10, epsrel=1e-9, limit=250,
+        )
+        integration_points = combined_g2[
+            (combined_g2 > switch_g2) & (combined_g2 < reference_g2)
+        ]
+        continuum_integral, _ = quad(
+            continuum_regular_integrand, switch_g2, reference_g2,
+            points=integration_points,
+            epsabs=1e-9, epsrel=1e-8,
+            limit=max(250, len(integration_points) + 50),
+        )
+        regular_integral = weak_integral + continuum_integral
+        log_lambda_over_mu = (
+            -b1/(2.0*b0*b0) * np.log(b0*reference_g2)
+            -1.0/(2.0*b0*reference_g2)
+            -0.5*regular_integral
+        )
+        lambda_gf[label] = float(np.exp(log_lambda_over_mu))
+        integrals[label] = float(regular_integral)
+
+    conversion = float(pt.lambda_msbar_over_lambda_gf)
+    lambda_msbar = {key: conversion*value for key, value in lambda_gf.items()}
+    return {
+        "reference_g2": reference_g2,
+        "switch_g2": switch_g2,
+        "lambda_gf_over_mu": lambda_gf,
+        "lambda_msbar_over_mu": lambda_msbar,
+        "lambda_msbar_over_lambda_gf": conversion,
+        "regular_integrals": integrals,
+    }
+
+
 def continuum_from_extended_interpolants(
     bf,
     flow,

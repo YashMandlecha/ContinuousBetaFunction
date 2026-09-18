@@ -2370,9 +2370,13 @@ for window in WINDOWS:
 
 # ## Reviewed weak-coupling diagnostics used by the fit4 reference notebooks
 
-from betafn.weak_coupling_plots import run_reviewed_weak_coupling_plots
+from betafn.weak_coupling_plots import (
+    run_lambda_parameter_plots,
+    run_reviewed_weak_coupling_plots,
+)
 
 reviewed_weak_results = None
+lambda_parameter_results = None
 if args.reviewed_weak_coupling:
     reviewed_weak_results = run_reviewed_weak_coupling_plots(
         bf=bf,
@@ -2388,6 +2392,20 @@ if args.reviewed_weak_coupling:
         pt_over_g4=pt_over_g4,
         load_case=load_case,
         save_figure=save_figure,
+    )
+    lambda_parameter_results = run_lambda_parameter_plots(
+        bf=bf,
+        flow=FLOW,
+        observables=OBSERVABLES,
+        windows=WINDOWS,
+        fit_id=FIT_ID,
+        fit_footer=FIT_FOOTER,
+        op_colors=OP_COLORS,
+        op_labels=OP_LABELS,
+        window_tag=window_tag,
+        load_case=load_case,
+        figure11_results=reviewed_weak_results['figure11'],
+        output_root=OUTPUT_ROOT,
     )
 
 
@@ -2421,6 +2439,7 @@ print(f'{FIT_ID} validation complete:',len(present),'continuum cases')
     'model_tag': MODEL_TAG,
     'continuum_cases': len(present),
     'reviewed_weak_coupling': args.reviewed_weak_coupling,
+    'lambda_parameter_outputs': lambda_parameter_results is not None,
     'elapsed_seconds': round(time_module.time() - RUN_STARTED, 3),
 }, indent=2) + '\n')
 
