@@ -49,8 +49,9 @@ st.markdown(
 )
 
 with st.expander("Interpolation models and priors", expanded=True):
-    fit4_tab, fit5_tab, fit6_tab, fit7_tab, fit8_tab, fit9_tab, fit10_tab = st.tabs(
-        ("fit4", "fit5", "fit6", "fit7", "fit8", "fit9", "fit10")
+    (fit4_tab, fit5_tab, fit6_tab, fit7_tab, fit8_tab, fit9_tab,
+     fit10_tab, fit11_tab) = st.tabs(
+        ("fit4", "fit5", "fit6", "fit7", "fit8", "fit9", "fit10", "fit11")
     )
     with fit4_tab:
         st.markdown("**Multiplicative correction to fixed three-loop perturbation theory**")
@@ -137,6 +138,25 @@ with st.expander("Interpolation models and priors", expanded=True):
             "All fitted coefficients are unconstrained: there are no priors "
             "and `xerrors=False`."
         )
+    with fit11_tab:
+        st.markdown("**Free additive constant in beta plus the Fit 4 correction**")
+        st.latex(
+            r"\beta(x)=a_0+\beta_{\rm PT}^{(3)}(x)"
+            r"\left[1+\sum_{n=1}^{N}c_nu^n\right],"
+            r"\qquad N\in\{3,4\}"
+        )
+        st.latex(
+            r"R(x)=\frac{a_0}{x^2}+R_{\rm PT}^{(3)}(x)"
+            r"\left[1+\sum_{n=1}^{N}c_nu^n\right]"
+        )
+        st.markdown(
+            "The additive beta-function constant $a_0$ is fitted independently "
+            "for each operator and finite flow time. In this initial variant, "
+            "$a_0$ and all included $c_n$ are unconstrained: there are no "
+            "coefficient priors and `xerrors=False`. The $a_0/x^2$ behavior "
+            "makes this a discretization diagnostic rather than a valid "
+            "standalone weak-coupling continuum ansatz."
+        )
 
     st.markdown("**Fixed $N_f=4$, SU(3), gradient-flow perturbative reference**")
     st.latex(
@@ -147,7 +167,7 @@ with st.expander("Interpolation models and priors", expanded=True):
         "In the normalized-u notation, A₀ = −0.0527714498137, "
         "A₁ = −0.0258684182433, and A₂ = 0.145164910733. "
         "The symbols b₁ and b₂ above denote fitted normalized-u coefficients, "
-        "not additional fixed perturbative constants. Fits 5–10 use no "
+        "not additional fixed perturbative constants. Fits 5–11 use no "
         "coefficient priors, so their free coefficients may take either sign."
     )
     st.markdown(
@@ -170,7 +190,9 @@ with st.expander("Interpolation models and priors", expanded=True):
         "| fit9 order 3 | `order_3_c2_fixed_0` | $c_1,c_3$ |\n"
         "| fit9 order 4 | `order_4_c2_fixed_0` | $c_1,c_3,c_4$ |\n"
         "| fit10 order 3 | `order_3_c1_c2_fixed_0_free_c0` | $c_0,c_3$ |\n"
-        "| fit10 order 4 | `order_4_c1_c2_fixed_0_free_c0` | $c_0,c_3,c_4$ |"
+        "| fit10 order 4 | `order_4_c1_c2_fixed_0_free_c0` | $c_0,c_3,c_4$ |\n"
+        "| fit11 order 3 | `order_3_additive_beta_constant_nopriors` | $a_0,c_1,c_2,c_3$ |\n"
+        "| fit11 order 4 | `order_4_additive_beta_constant_nopriors` | $a_0,c_1,c_2,c_3,c_4$ |"
     )
 
 

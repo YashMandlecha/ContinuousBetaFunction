@@ -51,9 +51,9 @@ plt.rcParams.update({
 # In[2]:
 
 
-parser = argparse.ArgumentParser(description='Run the complete NF4 fit4--fit10 analysis without Jupyter.')
+parser = argparse.ArgumentParser(description='Run the complete NF4 fit4--fit11 analysis without Jupyter.')
 parser.add_argument(
-    '--model', choices=('fit4', 'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10'),
+    '--model', choices=('fit4', 'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11'),
     default='fit4',
 )
 parser.add_argument('--fit4-order', type=int, default=4, help='Correction order for fit4 only.')
@@ -70,6 +70,10 @@ for model in ('fit8', 'fit9', 'fit10'):
         f'--{model}-order', type=int, choices=(3, 4), default=4,
         help=f'Multiplicative correction order for {model}.',
     )
+parser.add_argument(
+    '--fit11-order', type=int, choices=(3, 4), default=4,
+    help='Fit4-like multiplicative correction order for fit11.',
+)
 parser.add_argument(
     '--fit4-no-priors', action='store_true',
     help='Fit fit4 coefficients without priors; requires xerrors=False.',
@@ -179,7 +183,7 @@ elif FIT_ID == 'fit7':
     OUTPUT_FAMILY = FIT_ID
     powers_label = '+'.join(f'u^{power}' for power in PT_POWERS)
     FIT_WATERMARK = rf'fit7, free 3-loop coefficient + ${powers_label}$, no priors'
-else:
+elif FIT_ID in ('fit8', 'fit9', 'fit10'):
     ORDER = getattr(args, f'{FIT_ID}_order')
     FIT_WIDTH = None
     FIT_NO_PRIORS = True
@@ -204,6 +208,22 @@ else:
         FIXED_CORRECTION_COEFFICIENTS = {1: 0.0, 2: 0.0}
         MODEL_TAG = f'order_{ORDER}_c1_c2_fixed_0_free_c0'
         FIT_WATERMARK = rf'fit10, order {ORDER}, free $c_0$, $c_1=c_2=0$, no priors'
+else:
+    # Finite-lattice diagnostic:
+    # beta(x) = beta_const + beta_PT3(x) [1 + sum_n c_n u^n].
+    # Dividing by g_GF^4=x^2 therefore exposes beta_const/x^2.  All
+    # parameters are deliberately prior-free in this first fit11 variant.
+    ORDER = args.fit11_order
+    FIT_WIDTH = None
+    FIT_NO_PRIORS = True
+    FIT_PRIOR_COUNT = 0
+    FIT_FOOTER = 'additive beta constant and correction coefficients unprioritized, xerrors=False'
+    PT_POWERS = tuple(range(1, ORDER + 1))
+    OUTPUT_FAMILY = FIT_ID
+    MODEL_TAG = f'order_{ORDER}_additive_beta_constant_nopriors'
+    FIT_WATERMARK = (
+        rf'fit11, free additive $\beta$ constant + fit4 order {ORDER}, no priors'
+    )
 
 OUTPUT_ROOT = args.output_base.expanduser().resolve() / OUTPUT_FAMILY / MODEL_TAG
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
@@ -220,6 +240,8 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     'fit8_order': args.fit8_order if FIT_ID == 'fit8' else None,
     'fit9_order': args.fit9_order if FIT_ID == 'fit9' else None,
     'fit10_order': args.fit10_order if FIT_ID == 'fit10' else None,
+    'fit11_order': args.fit11_order if FIT_ID == 'fit11' else None,
+    'additive_beta_constant_parameter': 'beta_const' if FIT_ID == 'fit11' else None,
     'interpolation_xerrors': not FIT_NO_PRIORS,
     'pt_powers': PT_POWERS,
     'fixed_correction_coefficients': FIXED_CORRECTION_COEFFICIENTS,
@@ -394,6 +416,27 @@ elif FIT_ID == 'fit7':
         p0={'b2': [0.0], **{f'd{power}': [0.0] for power in PT_POWERS}},
         xerrors=False,
     )
+elif FIT_ID == 'fit11':
+    def additive_beta_constant_interpolation(x, p):
+        x = np.asarray(x)
+        u = x / bf.perturbative_beta_function.nrm
+        correction = 1.0 + sum(
+            p[f'pt_c{power}'][0] * u**power for power in PT_POWERS
+        )
+        return (
+            p['beta_const'][0]
+            + bf.perturbative_beta_function(x, loops=3) * correction
+        )
+
+    interpolation = betafn.InterpolationSpec(
+        fcn=additive_beta_constant_interpolation,
+        prior=None,
+        p0={
+            'beta_const': [0.0],
+            **{f'pt_c{power}': [0.0] for power in PT_POWERS},
+        },
+        xerrors=False,
+    )
 else:
     def fixed_multiplicative_interpolation(x, p):
         u = np.asarray(x) / bf.perturbative_beta_function.nrm
@@ -410,6 +453,10 @@ else:
 
 def interpolation_coefficient_specs():
     """Return plot labels and parameter keys for the active interpolation."""
+    if FIT_ID == 'fit11':
+        return [(r'a_0^{(\beta)}', 'beta_const')] + [
+            (rf'c_{{{power}}}', f'pt_c{power}') for power in PT_POWERS
+        ]
     if FIT_ID in ('fit4', 'fit8', 'fit9', 'fit10'):
         return [(rf'c_{{{power}}}', f'pt_c{power}') for power in PT_POWERS]
     higher_orders = [(rf'd_{{{power}}}', f'd{power}') for power in PT_POWERS]
@@ -451,7 +498,7 @@ if args.validate_only:
             'Interpolation/plot parameter mismatch: '
             f'{parameter_names} versus {plotted_parameter_names}'
         )
-    if FIT_ID in ('fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10'):
+    if FIT_ID in ('fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11'):
         if interpolation.prior is not None or interpolation.xerrors:
             raise RuntimeError(
                 f'{FIT_ID} must have prior=None and xerrors=False; got '
@@ -495,6 +542,20 @@ if args.validate_only:
         )
         np.testing.assert_allclose(
             interpolation.fcn(test_x, test_parameters), test_x**2 * expected_ratio,
+            rtol=1e-13, atol=1e-13,
+        )
+    elif FIT_ID == 'fit11':
+        expected_correction = 1.0 + sum(
+            test_parameters[f'pt_c{power}'][0] * test_u**power
+            for power in PT_POWERS
+        )
+        expected_beta = (
+            test_parameters['beta_const'][0]
+            + bf.perturbative_beta_function(test_x, loops=3)
+            * expected_correction
+        )
+        np.testing.assert_allclose(
+            interpolation.fcn(test_x, test_parameters), expected_beta,
             rtol=1e-13, atol=1e-13,
         )
     expected_fixed_coefficients = {
@@ -712,7 +773,7 @@ def save_interpolation_diagnostics():
         )
 
 
-if FIT_ID in ('fit4', 'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10'):
+if FIT_ID in ('fit4', 'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11'):
     save_interpolation_diagnostics()
 
 
@@ -2111,6 +2172,13 @@ for window in WINDOWS:
 
 def ratio_model(x, p):
   u = np.asarray(x) / bf.perturbative_beta_function.nrm
+  if FIT_ID == 'fit11':
+      x = np.asarray(x)
+      correction = 1.0 + sum(
+          p[f'c{power}'][0] * u**power
+          for power in PT_POWERS
+      )
+      return p['beta_const'][0] / x**2 + pt_over_g4(x, 3) * correction
   if FIT_ID == 'fit5':
       return pt_over_g4(x, 3) + sum(
           p[f'd{power}'][0] * u**power
@@ -2176,15 +2244,14 @@ for window in WINDOWS:
       continuum_mean = gv.mean(y)
       continuum_sdev = gv.sdev(y)
 
-      prefix = 'c' if FIT_ID in ('fit4', 'fit8', 'fit9', 'fit10') else 'd'
-      parameters = {
-          f'{prefix}{power}': [0.0]
-          for power in PT_POWERS
-      }
+      prefix = 'c' if FIT_ID in ('fit4', 'fit8', 'fit9', 'fit10', 'fit11') else 'd'
+      parameters = {f'{prefix}{power}': [0.0] for power in PT_POWERS}
       if FIT_ID == 'fit6':
           parameters['b1'] = [0.0]
       elif FIT_ID == 'fit7':
           parameters['b2'] = [0.0]
+      elif FIT_ID == 'fit11':
+          parameters['beta_const'] = [0.0]
 
       # The gvars in y retain the covariance of the correlated continuum
       # calculation. lsqfit therefore uses their full covariance matrix.
@@ -2200,7 +2267,10 @@ for window in WINDOWS:
 
       # Evaluate the fitted curve and its posterior uncertainty from
       # g²=0 through the complete correlated-continuum data range.
-      xp = np.linspace(0.0, float(x[-1]), 600)
+      # Fit11 contains beta_const/x^2 in this ratio and is undefined at x=0.
+      # Display its correlated fit only over the continuum-data support.
+      xp_min = float(x[0]) if FIT_ID == 'fit11' else 0.0
+      xp = np.linspace(xp_min, float(x[-1]), 600)
       yp = np.asarray(
           ratio_model(xp, fit.p),
           dtype=object,
