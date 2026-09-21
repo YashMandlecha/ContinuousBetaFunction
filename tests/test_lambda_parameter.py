@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 from scipy.integrate import quad
 
+from betafn.blinding import blind_lambda_estimate
 from betafn.perturbative import PerturbativeBetaFunction
 from betafn.weak_coupling import (
     figure11_integral_match,
@@ -13,6 +14,31 @@ from betafn.weak_coupling import (
 
 
 class TestLambdaParameter(unittest.TestCase):
+    def test_blinding_scales_both_schemes_without_exposing_factor(self):
+        estimate = {
+            "lambda_gf_over_mu": {
+                "central": 0.2,
+                "plus_sigma": 0.22,
+                "minus_sigma": 0.18,
+            },
+            "lambda_msbar_over_mu": {
+                "central": 0.1,
+                "plus_sigma": 0.11,
+                "minus_sigma": 0.09,
+            },
+            "lambda_msbar_over_lambda_gf": 0.5,
+        }
+        from unittest.mock import patch
+
+        with patch("betafn.blinding.load_lambda_blinding_factor", return_value=1.3):
+            blinded = blind_lambda_estimate(estimate)
+
+        self.assertEqual(blinded["lambda_gf_over_mu"]["central"], 0.26)
+        self.assertEqual(blinded["lambda_msbar_over_mu"]["central"], 0.13)
+        self.assertEqual(blinded["lambda_msbar_over_lambda_gf"], 0.5)
+        self.assertTrue(blinded["blinded"])
+        self.assertNotIn("blinding_factor", blinded)
+
     def test_pure_gauge_msbar_conversion_matches_published_value(self):
         pt = PerturbativeBetaFunction(nf=0, nc=3)
         published_ratio = 0.622 / 1.164

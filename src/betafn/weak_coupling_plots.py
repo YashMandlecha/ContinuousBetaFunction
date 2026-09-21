@@ -7,6 +7,7 @@ import gvar as gv
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from .blinding import add_blinded_watermark, blind_lambda_estimate
 from .weak_coupling import (
     continuum_from_extended_interpolants,
     figure11_integral_match,
@@ -162,12 +163,14 @@ def run_lambda_parameter_plots(
             at_t0 = bool(available_g2_max >= g2_t0)
             reference_scale = "t0" if at_t0 else "t_star"
 
-            estimate = lambda_parameter_from_matched_beta(
-                x,
-                y,
-                figure11_results[window][operator],
-                bf.perturbative_beta_function,
-                reference_g2=reference_g2,
+            estimate = blind_lambda_estimate(
+                lambda_parameter_from_matched_beta(
+                    x,
+                    y,
+                    figure11_results[window][operator],
+                    bf.perturbative_beta_function,
+                    reference_g2=reference_g2,
+                )
             )
             lambda_results[window][operator] = estimate
 
@@ -189,6 +192,7 @@ def run_lambda_parameter_plots(
                 "g2_supported_max": available_g2_max,
                 "g2_t0": g2_t0,
                 "reaches_t0": at_t0,
+                "lambda_values_blinded": True,
                 "lambda_msbar_over_lambda_gf": conversion,
             }
             for scheme, values in (
@@ -240,7 +244,7 @@ def run_lambda_parameter_plots(
     )
     axes[1].set_xlabel(r"flow-time window $t/a^2$")
     fig.suptitle(
-        rf"{fit_id}: interim $\Lambda$ estimates; "
+        rf"{fit_id}: BLINDED interim $\Lambda$ estimates; "
         r"$g^2_{\rm ref}=g^2_{\rm GF}(t_{\rm ref})$ is tabulated separately"
     )
     fig.tight_layout()
@@ -249,6 +253,7 @@ def run_lambda_parameter_plots(
             0.995, 0.005, fit_footer, ha="right", va="bottom",
             fontsize=8, color="gray", alpha=.75,
         )
+    add_blinded_watermark(fig)
     base = output_root / f"lambda_parameter_by_window_{fit_id}"
     fig.savefig(base.with_suffix(".png"), dpi=300, bbox_inches="tight")
     fig.savefig(base.with_suffix(".pdf"), dpi=300, bbox_inches="tight")
