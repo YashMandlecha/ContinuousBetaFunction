@@ -18,6 +18,7 @@ from .weak_coupling import (
 def run_reviewed_weak_coupling_plots(
     *, bf, flow, observables, windows, config, fit_id, fit_watermark,
     op_colors, op_labels, flow_times, pt_over_g4, load_case, save_figure,
+    include_extended_to_zero=True,
 ):
     """Generate integral-matching and extended-interpolant diagnostics."""
     match_window = (0.8, 1.2)
@@ -77,6 +78,13 @@ def run_reviewed_weak_coupling_plots(
             print(window, op_labels[operator], "Fig.11 b_p:", result["coefficients"])
         axes[0].set_ylabel(r"$\beta_{GF}/g_{GF}^4$")
         save_figure(fig, window, f"figure11_integral_matching_{fit_id}", "correlated")
+
+    if not include_extended_to_zero:
+        print(
+            f"{fit_id}: skipping extended-to-zero diagnostics because the "
+            "intermediate interpolation contains an additive beta constant"
+        )
+        return {"figure11": figure11_results, "direct": {}}
 
     direct_grid = np.linspace(0.0, 2.0, 21)
     display_x = np.linspace(1e-7, direct_grid[-1], 350)

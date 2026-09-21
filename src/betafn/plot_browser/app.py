@@ -155,7 +155,9 @@ with st.expander("Interpolation models and priors", expanded=True):
             "$a_0$ and all included $c_n$ are unconstrained: there are no "
             "coefficient priors and `xerrors=False`. The $a_0/x^2$ behavior "
             "makes this a discretization diagnostic rather than a valid "
-            "standalone weak-coupling continuum ansatz."
+            "standalone weak-coupling continuum ansatz. Consequently, the "
+            "finite-spacing extended-to-zero diagnostics are intentionally "
+            "not generated for Fit 11."
         )
 
     st.markdown("**Fixed $N_f=4$, SU(3), gradient-flow perturbative reference**")

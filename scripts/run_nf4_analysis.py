@@ -2462,6 +2462,7 @@ if args.reviewed_weak_coupling:
         pt_over_g4=pt_over_g4,
         load_case=load_case,
         save_figure=save_figure,
+        include_extended_to_zero=FIT_ID != 'fit11',
     )
     lambda_parameter_results = run_lambda_parameter_plots(
         bf=bf,
