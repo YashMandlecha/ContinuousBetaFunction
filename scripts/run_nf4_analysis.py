@@ -2265,10 +2265,10 @@ for window in WINDOWS:
       fit = lsqfit.nonlinear_fit(**fit_kwargs)
       fits[operator] = fit
 
-      # Evaluate the fitted curve and its posterior uncertainty from
-      # g²=0 through the complete correlated-continuum data range.
-      # Fit11 contains beta_const/x^2 in this ratio and is undefined at x=0.
-      # Display its correlated fit only over the continuum-data support.
+      # Evaluate the fitted curve and its posterior uncertainty. Fit11
+      # contains beta_const/x^2 in this ratio and is undefined at x=0, so
+      # display it only over the positive continuum-data support. All other
+      # models retain their analytic weak-coupling continuation from x=0.
       xp_min = float(x[0]) if FIT_ID == 'fit11' else 0.0
       xp = np.linspace(xp_min, float(x[-1]), 600)
       yp = np.asarray(
@@ -2304,8 +2304,8 @@ for window in WINDOWS:
           zorder=2,
       )
 
-      # PT-constrained weak-coupling fit and posterior uncertainty,
-      # including the extrapolated interval down to g²=0.
+      # PT-constrained weak-coupling fit and posterior uncertainty. For
+      # Fit11 the curve begins at the smallest supported positive coupling.
       ax.plot(
           xp,
           fit_mean,
@@ -2328,10 +2328,13 @@ for window in WINDOWS:
           zorder=3,
       )
 
-      origin = np.asarray(
-          ratio_model(np.asarray([0.0]), fit.p),
-          dtype=object,
-      )[0]
+      if FIT_ID == 'fit11':
+          origin = 'undefined (additive beta constant / g^4)'
+      else:
+          origin = np.asarray(
+              ratio_model(np.asarray([0.0]), fit.p),
+              dtype=object,
+          )[0]
 
       print(
           window,
@@ -2407,7 +2410,11 @@ for window in WINDOWS:
           + '\n'
           + r'Bands show posterior $\pm1\sigma$'
           + '\n'
-          + r'Fixed $c_0=1$ perturbative limit'
+          + (
+              r'Additive constant: $\beta/g^4$ undefined at $g^2=0$'
+              if FIT_ID == 'fit11'
+              else r'Fixed $c_0=1$ perturbative limit'
+          )
       ),
       transform=ax.transAxes,
       fontsize=10.5,
