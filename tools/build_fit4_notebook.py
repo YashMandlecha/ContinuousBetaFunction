@@ -88,7 +88,7 @@ OP_COLORS = {
 }
 
 # Exhaustive integer windows used by the scan reference notebook.
-TMIN_VALUES = tuple(range(4, 8))
+TMIN_VALUES = tuple(range(3, 8))
 TMAX_LIMIT = 8
 WINDOWS = tuple(
     (float(tmin), float(tmax))
@@ -96,7 +96,7 @@ WINDOWS = tuple(
     for tmax in range(tmin + 1, TMAX_LIMIT + 1)
 )
 CENTRAL_WINDOW = (4.0, 6.0)
-G2_GRID = (0.9, 4.9, 0.2)
+G2_GRID = (0.9, 4.9, 0.1)
 TARGET_G2 = (1.1, 1.3, 1.5, 1.8, 2.2, 2.6, 3.0, 4.0)
 
 def window_tag(window):
@@ -533,6 +533,7 @@ code(r'''def snapshot_case(window, mode):
         'window': window, 'mode': mode, 'fit_id': FIT_ID, 'order': ORDER,
         'g2s': copy.deepcopy(bf.g2s), 'betas': copy.deepcopy(bf.betas),
         'cnt_fits': copy.deepcopy(bf.cnt_fits), 'cnt_qof': copy.deepcopy(bf.continuum.quality),
+        'domains': copy.deepcopy(bf.continuum.domains),
         'metadata': copy.deepcopy(bf.continuum.metadata),
     }
     path = case_dir(window, mode) / 'continuum_case.gvar'
@@ -653,22 +654,82 @@ code(r'''for window in WINDOWS:
     ax1.legend(frameon=False); fig.suptitle(rf'Interpolation quality, $t/a^2\in[{window[0]:g},{window[1]:g}]$')
     save_figure(fig, window, 'interpolation_quality_fit4')'''),
 md('## Plot helper — continuum extrapolations versus $a^2/t$'),
-code(r'''def plot_continuum_panels(window, mode, divide_by_g4):
+code(r'''def continuum_panel_times(case, window, operator, g2):
+    tau0 = config.tau0
+    all_times = sorted(bf.ntrp_fits[FLOW][operator], key=float)
+    valid_times = [
+        time for time in all_times
+        if float(time) - tau0 > 0.0
+        and bf.ntrp_nf[FLOW][operator][time][0]
+        <= g2
+        <= bf.ntrp_nf[FLOW][operator][time][-1]
+    ]
+    domain_by_g2 = case.get('domains', {}).get(FLOW, {}).get(operator, {})
+    fit_times = []
+    if domain_by_g2:
+        domain_key = min(domain_by_g2, key=lambda key: abs(float(key) - g2))
+        if np.isclose(float(domain_key), g2, rtol=0.0, atol=1e-12):
+            fit_times = list(domain_by_g2[domain_key])
+    if not fit_times:
+        fit_times = [
+            time for time in valid_times
+            if window[0] <= float(time) - tau0 <= window[1]
+        ]
+    fit_times = sorted(fit_times, key=float)
+
+    outside_times = []
+    for target, is_on_side in (
+        (window[0] - 1.0, lambda nominal: nominal < window[0]),
+        (window[1] + 1.0, lambda nominal: nominal > window[1]),
+    ):
+        candidates = [
+            time for time in valid_times
+            if is_on_side(float(time) - tau0)
+        ]
+        if candidates:
+            outside_times.append(min(
+                candidates,
+                key=lambda time: abs((float(time) - tau0) - target),
+            ))
+    return fit_times, outside_times
+
+
+def plot_continuum_panels(window, mode, divide_by_g4):
     case = load_case(window, mode)
     fig, axes = plt.subplots(2, 4, figsize=(18, 9))
-    times = flow_times(window)
-    xpts = np.asarray([1/float(t) for t in times])
     for ax, target in zip(axes.ravel(), TARGET_G2):
         for operator in OBSERVABLES:
             grid=np.asarray(case['g2s'][FLOW][operator], float)
             idx=int(np.argmin(abs(grid-target))); g2=float(grid[idx])
-            values=np.asarray([bf.interpolation.model.evaluate(g2, bf.ntrp_fits[FLOW][operator][t]) for t in times], dtype=object)
+            fit_times, outside_times = continuum_panel_times(
+                case, window, operator, g2
+            )
+            times = fit_times + outside_times
+            xpts = np.asarray([
+                1 / (float(time) - config.tau0) for time in times
+            ])
+            jacobian = np.asarray([
+                (float(time) - config.tau0) / float(time) for time in times
+            ])
+            values=np.asarray([
+                factor * bf.interpolation.model.evaluate(
+                    g2, bf.ntrp_fits[FLOW][operator][time]
+                )
+                for factor, time in zip(jacobian, times)
+            ], dtype=object)
             params=case['cnt_fits'][FLOW][operator][idx]
             xline=np.linspace(0, max(xpts)*1.05, 200)
             yline=params['beta'][0] + params['slope'][0]*xline
             norm=g2**2 if divide_by_g4 else 1.0
-            ax.errorbar(xpts, gv.mean(values/norm), yerr=gv.sdev(values/norm), fmt='o', capsize=3,
-                        color=OP_COLORS[operator], label=OP_LABELS[operator])
+            nfit = len(fit_times)
+            ax.errorbar(xpts[:nfit], gv.mean(values[:nfit]/norm),
+                        yerr=gv.sdev(values[:nfit]/norm), fmt='o', capsize=3,
+                        color=OP_COLORS[operator], markerfacecolor=OP_COLORS[operator],
+                        label=OP_LABELS[operator])
+            if outside_times:
+                ax.errorbar(xpts[nfit:], gv.mean(values[nfit:]/norm),
+                            yerr=gv.sdev(values[nfit:]/norm), fmt='o', capsize=3,
+                            color=OP_COLORS[operator], markerfacecolor='none', alpha=.75)
             ax.plot(xline, gv.mean(yline/norm), color=OP_COLORS[operator])
             ax.fill_between(xline, gv.mean(yline/norm)-gv.sdev(yline/norm),
                             gv.mean(yline/norm)+gv.sdev(yline/norm), color=OP_COLORS[operator], alpha=.15)

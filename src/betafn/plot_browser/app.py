@@ -50,8 +50,11 @@ st.markdown(
 
 with st.expander("Interpolation models and priors", expanded=True):
     (fit4_tab, fit5_tab, fit6_tab, fit7_tab, fit8_tab, fit9_tab,
-     fit10_tab, fit11_tab) = st.tabs(
-        ("fit4", "fit5", "fit6", "fit7", "fit8", "fit9", "fit10", "fit11")
+     fit10_tab, fit11_tab, fit12_tab) = st.tabs(
+        (
+            "fit4", "fit5", "fit6", "fit7", "fit8", "fit9", "fit10",
+            "fit11", "fit12",
+        )
     )
     with fit4_tab:
         st.markdown("**Multiplicative correction to fixed three-loop perturbation theory**")
@@ -143,7 +146,7 @@ with st.expander("Interpolation models and priors", expanded=True):
         st.latex(
             r"\beta(x)=a_0+\beta_{\rm PT}^{(3)}(x)"
             r"\left[1+\sum_{n=1}^{N}c_nu^n\right],"
-            r"\qquad N\in\{3,4\}"
+            r"\qquad N\in\{3,4,5\}"
         )
         st.latex(
             r"R(x)=\frac{a_0}{x^2}+R_{\rm PT}^{(3)}(x)"
@@ -159,6 +162,27 @@ with st.expander("Interpolation models and priors", expanded=True):
             "finite-spacing extended-to-zero diagnostics are intentionally "
             "not generated for Fit 11."
         )
+    with fit12_tab:
+        st.markdown(
+            "**Finite-spacing additive artifact with the multiplicative "
+            "intercept fixed to one**"
+        )
+        st.latex(
+            r"\beta(x,z)=zA_0+\beta_{\rm PT}^{(3)}(x)"
+            r"\left[1+\sum_{n=1}^{N}c_nu^n\right],"
+            r"\qquad z=a^2/t,\quad N\in\{3,4,5\}"
+        )
+        st.markdown(
+            "Each finite-flow-time interpolation allows an independent "
+            "$a_0$ while fixing $c_0=1$. The joint continuum fit enforces "
+            "$a_0(z)=zA_0$, so $a_0\to0$ as $z\to0$. The continuum curve is "
+            "therefore "
+            r"$\beta_{\rm PT}^{(3)}(x)[1+\sum c_nu^n]$. "
+            "The $c_n$ are shared across all $z$; there are no additional "
+            "multiplicative cutoff coefficients. "
+            "All $A_0,c_n$ are unconstrained; there are no coefficient "
+            "priors and `xerrors=False`."
+        )
 
     st.markdown("**Fixed $N_f=4$, SU(3), gradient-flow perturbative reference**")
     st.latex(
@@ -169,14 +193,15 @@ with st.expander("Interpolation models and priors", expanded=True):
         "In the normalized-u notation, A₀ = −0.0527714498137, "
         "A₁ = −0.0258684182433, and A₂ = 0.145164910733. "
         "The symbols b₁ and b₂ above denote fitted normalized-u coefficients, "
-        "not additional fixed perturbative constants. Fits 5–11 use no "
+        "not additional fixed perturbative constants. Fits 5–12 use no "
         "coefficient priors, so their free coefficients may take either sign."
     )
     st.markdown(
         "**Common analysis settings:** continuum points use the 41-value grid "
-        r"$x=0.9,1.0,\ldots,4.9$; all ten integer flow-time windows from "
-        "$[4,5]$ through $[7,8]$ are analyzed with both diagonal and "
-        "kernel-correlated continuum fits."
+        r"$x=0.9,1.0,\ldots,4.9$; all 15 integer flow-time windows from "
+        "$[3,4]$ through $[7,8]$ are analyzed with both diagonal and "
+        "kernel-correlated continuum fits. Each run also performs the five "
+        r"flow-time thinning tests $\Delta(t/a^2)=0.01,0.02,0.05,0.10,0.20$."
     )
     st.markdown(
         "| Variant | Output model tag | Fitted parameters |\n"
@@ -194,7 +219,11 @@ with st.expander("Interpolation models and priors", expanded=True):
         "| fit10 order 3 | `order_3_c1_c2_fixed_0_free_c0` | $c_0,c_3$ |\n"
         "| fit10 order 4 | `order_4_c1_c2_fixed_0_free_c0` | $c_0,c_3,c_4$ |\n"
         "| fit11 order 3 | `order_3_additive_beta_constant_nopriors` | $a_0,c_1,c_2,c_3$ |\n"
-        "| fit11 order 4 | `order_4_additive_beta_constant_nopriors` | $a_0,c_1,c_2,c_3,c_4$ |"
+        "| fit11 order 4 | `order_4_additive_beta_constant_nopriors` | $a_0,c_1,c_2,c_3,c_4$ |\n"
+        "| fit11 order 5 | `order_5_additive_beta_constant_nopriors` | $a_0,c_1,c_2,c_3,c_4,c_5$ |\n"
+        "| fit12 order 3 | `order_3_joint_a0_continuum_nopriors` | $A_0,c_1,c_2,c_3$ |\n"
+        "| fit12 order 4 | `order_4_joint_a0_continuum_nopriors` | $A_0,c_1,c_2,c_3,c_4$ |\n"
+        "| fit12 order 5 | `order_5_joint_a0_continuum_nopriors` | $A_0,c_1,c_2,c_3,c_4,c_5$ |"
     )
 
 

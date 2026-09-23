@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=nf4-fit4
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --output=slurm_logs/%x-%j.out

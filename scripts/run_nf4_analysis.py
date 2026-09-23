@@ -3,10 +3,11 @@
 
 # # NF4 continuous-beta-function cluster analysis
 # 
-# Updated upstream analysis (`2af131f`), Wilson flow, on-the-fly TLN, three-volume infinite-volume limit, and exhaustive integer flow-time-window scan.  The interpolation ansatz is
-# $$
-# \beta(x)=\beta_{\rm PT}^{(3)}(x)\left[1+\sum_{n=1}^{4}c_n(x/4\pi)^n\right].
-# $$
+# Updated upstream analysis (`2af131f`), Wilson flow, on-the-fly TLN,
+# three-volume infinite-volume limit, and exhaustive integer flow-time-window
+# scan for Fits 4--12.  The selected model is recorded in
+# `run_configuration.json`; Fit12 additionally imposes a0(z)=z*A0 and fixes
+# c0=1 at every lattice spacing, with z=a^2/t.
 # 
 # Every plot family has its own cell. Outputs are organized as `fit4/order_4/t_<min>_<max>/<mode>/`, where mode is `diagonal` or `correlated`. The correlated result uses the upstream kernel covariance. Rectangle measurements are combined at the raw-history level into the Symanzik observable before its dedicated TLN correction.
 
@@ -16,6 +17,7 @@
 from pathlib import Path
 import argparse, copy, gc, json, os, shutil, sys
 import time as time_module
+from contextlib import contextmanager
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / 'src'))
@@ -29,6 +31,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
+from scipy.stats import chi2 as chi2_distribution
+
+from betafn import fit12 as fit12_model
 
 print('betafn package:', Path(betafn.__file__).resolve())
 print('repository:', REPO_ROOT)
@@ -51,9 +56,12 @@ plt.rcParams.update({
 # In[2]:
 
 
-parser = argparse.ArgumentParser(description='Run the complete NF4 fit4--fit11 analysis without Jupyter.')
+parser = argparse.ArgumentParser(description='Run the complete NF4 fit4--fit12 analysis without Jupyter.')
 parser.add_argument(
-    '--model', choices=('fit4', 'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11'),
+    '--model', choices=(
+        'fit4', 'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11',
+        'fit12',
+    ),
     default='fit4',
 )
 parser.add_argument('--fit4-order', type=int, default=4, help='Correction order for fit4 only.')
@@ -71,8 +79,12 @@ for model in ('fit8', 'fit9', 'fit10'):
         help=f'Multiplicative correction order for {model}.',
     )
 parser.add_argument(
-    '--fit11-order', type=int, choices=(3, 4), default=4,
+    '--fit11-order', type=int, choices=(3, 4, 5), default=4,
     help='Fit4-like multiplicative correction order for fit11.',
+)
+parser.add_argument(
+    '--fit12-order', type=int, choices=(3, 4, 5), default=4,
+    help='Correction order for the continuum-constrained fit12 model.',
 )
 parser.add_argument(
     '--fit4-no-priors', action='store_true',
@@ -89,6 +101,12 @@ parser.add_argument(
     action=argparse.BooleanOptionalAction,
     default=True,
     help='Generate the Figure-11 matching and extended-interpolant diagnostics.',
+)
+parser.add_argument(
+    '--continuum-thinning',
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help='Run the five-spacing continuum flow-time thinning study.',
 )
 parser.add_argument('--validate-only', action='store_true', help='Validate configuration/model construction, then exit.')
 args = parser.parse_args()
@@ -208,7 +226,7 @@ elif FIT_ID in ('fit8', 'fit9', 'fit10'):
         FIXED_CORRECTION_COEFFICIENTS = {1: 0.0, 2: 0.0}
         MODEL_TAG = f'order_{ORDER}_c1_c2_fixed_0_free_c0'
         FIT_WATERMARK = rf'fit10, order {ORDER}, free $c_0$, $c_1=c_2=0$, no priors'
-else:
+elif FIT_ID == 'fit11':
     # Finite-lattice diagnostic:
     # beta(x) = beta_const + beta_PT3(x) [1 + sum_n c_n u^n].
     # Dividing by g_GF^4=x^2 therefore exposes beta_const/x^2.  All
@@ -223,6 +241,25 @@ else:
     MODEL_TAG = f'order_{ORDER}_additive_beta_constant_nopriors'
     FIT_WATERMARK = (
         rf'fit11, free additive $\beta$ constant + fit4 order {ORDER}, no priors'
+    )
+else:
+    # At finite lattice spacing z=a^2/t, Fit12 permits
+    #   a0(z)=z*A0 and c0(z)=1.
+    # Thus the continuum limit has a0(0)=0 and c0=1 exactly.  The c_n are
+    # shared across all z; z*A0 is the only explicit cutoff term.
+    ORDER = args.fit12_order
+    FIT_WIDTH = None
+    FIT_NO_PRIORS = True
+    FIT_PRIOR_COUNT = 0
+    FIT_FOOTER = (
+        'joint continuum constraint a0=z*A0; c0=1 and c_n shared across z; '
+        'no coefficient priors, xerrors=False'
+    )
+    PT_POWERS = tuple(range(1, ORDER + 1))
+    OUTPUT_FAMILY = FIT_ID
+    MODEL_TAG = f'order_{ORDER}_joint_a0_continuum_nopriors'
+    FIT_WATERMARK = (
+        rf'fit12, order {ORDER}, $a_0=zA_0$, fixed $c_0=1$, no priors'
     )
 
 OUTPUT_ROOT = args.output_base.expanduser().resolve() / OUTPUT_FAMILY / MODEL_TAG
@@ -241,7 +278,17 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     'fit9_order': args.fit9_order if FIT_ID == 'fit9' else None,
     'fit10_order': args.fit10_order if FIT_ID == 'fit10' else None,
     'fit11_order': args.fit11_order if FIT_ID == 'fit11' else None,
-    'additive_beta_constant_parameter': 'beta_const' if FIT_ID == 'fit11' else None,
+    'fit12_order': args.fit12_order if FIT_ID == 'fit12' else None,
+    'finite_spacing_additive_beta_parameter': (
+        'beta_const' if FIT_ID in ('fit11', 'fit12') else None
+    ),
+    'fit12_continuum_constraints': (
+        {
+            'z': 'a^2/t', 'a0': 'z*A0',
+            'c0': '1 fixed for every z', 'coefficient_artifacts': 'none',
+        }
+        if FIT_ID == 'fit12' else None
+    ),
     'interpolation_xerrors': not FIT_NO_PRIORS,
     'pt_powers': PT_POWERS,
     'fixed_correction_coefficients': FIXED_CORRECTION_COEFFICIENTS,
@@ -252,6 +299,9 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     'use_gamma_method': args.use_gamma_method,
     'latex': args.latex,
     'reviewed_weak_coupling': args.reviewed_weak_coupling,
+    'continuum_thinning': args.continuum_thinning,
+    'flow_time_limits': [3.0, 8.0],
+    'thinning_flow_spacings': [0.01, 0.02, 0.05, 0.10, 0.20],
     'slurm_job_id': os.environ.get('SLURM_JOB_ID'),
     'slurm_array_task_id': os.environ.get('SLURM_ARRAY_TASK_ID'),
 }, indent=2) + '\n')
@@ -272,7 +322,7 @@ OP_COLORS = {
 }
 
 # Exhaustive integer windows used by the scan reference notebook.
-TMIN_VALUES = tuple(range(4, 8))
+TMIN_VALUES = tuple(range(3, 8))
 TMAX_LIMIT = 8
 WINDOWS = tuple(
     (float(tmin), float(tmax))
@@ -282,6 +332,17 @@ WINDOWS = tuple(
 CENTRAL_WINDOW = (4.0, 6.0)
 G2_GRID = (0.9, 4.9, 0.1)
 TARGET_G2 = (1.1, 1.3, 1.5, 1.8, 2.2, 2.6, 3.0, 4.0)
+THINNING_FLOW_SPACINGS = (0.01, 0.02, 0.05, 0.10, 0.20)
+THINNING_CONTINUUM_CASES = {
+    'diagonal': {
+        'cov_mode': 'diagonal', 'diagonal': True,
+        'correlated': False, 'error_mode': 'fit',
+    },
+    'correlated': {
+        'cov_mode': 'kernel', 'diagonal': False, 'kernel': 'rbf',
+        'correlated': True, 'error_mode': 'fit',
+    },
+}
 
 def window_tag(window):
     return f't_{window[0]:g}_{window[1]:g}'.replace('.', 'p')
@@ -437,6 +498,18 @@ elif FIT_ID == 'fit11':
         },
         xerrors=False,
     )
+elif FIT_ID == 'fit12':
+    def constrained_continuum_interpolation(x, p):
+        return fit12_model.interpolation_beta(
+            x, p, bf.perturbative_beta_function, ORDER
+        )
+
+    interpolation = betafn.InterpolationSpec(
+        fcn=constrained_continuum_interpolation,
+        prior=None,
+        p0=fit12_model.interpolation_p0(ORDER),
+        xerrors=False,
+    )
 else:
     def fixed_multiplicative_interpolation(x, p):
         u = np.asarray(x) / bf.perturbative_beta_function.nrm
@@ -455,6 +528,12 @@ def interpolation_coefficient_specs():
     """Return plot labels and parameter keys for the active interpolation."""
     if FIT_ID == 'fit11':
         return [(r'a_0^{(\beta)}', 'beta_const')] + [
+            (rf'c_{{{power}}}', f'pt_c{power}') for power in PT_POWERS
+        ]
+    if FIT_ID == 'fit12':
+        return [
+            (r'a_0^{(\beta)}', 'beta_const'),
+        ] + [
             (rf'c_{{{power}}}', f'pt_c{power}') for power in PT_POWERS
         ]
     if FIT_ID in ('fit4', 'fit8', 'fit9', 'fit10'):
@@ -498,7 +577,9 @@ if args.validate_only:
             'Interpolation/plot parameter mismatch: '
             f'{parameter_names} versus {plotted_parameter_names}'
         )
-    if FIT_ID in ('fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11'):
+    if FIT_ID in (
+        'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11', 'fit12'
+    ):
         if interpolation.prior is not None or interpolation.xerrors:
             raise RuntimeError(
                 f'{FIT_ID} must have prior=None and xerrors=False; got '
@@ -558,6 +639,41 @@ if args.validate_only:
             interpolation.fcn(test_x, test_parameters), expected_beta,
             rtol=1e-13, atol=1e-13,
         )
+    elif FIT_ID == 'fit12':
+        expected_correction = 1.0 + sum(
+            test_parameters[f'pt_c{power}'][0] * test_u**power
+            for power in PT_POWERS
+        )
+        expected_beta = (
+            test_parameters['beta_const'][0]
+            + bf.perturbative_beta_function(test_x, loops=3)
+            * expected_correction
+        )
+        np.testing.assert_allclose(
+            interpolation.fcn(test_x, test_parameters), expected_beta,
+            rtol=1e-13, atol=1e-13,
+        )
+
+        joint_names = fit12_model.joint_parameter_names(ORDER)
+        joint_parameters = {
+            name: [0.05 * (index + 1)]
+            for index, name in enumerate(joint_names)
+        }
+        continuum = fit12_model.continuum_beta(
+            test_x, joint_parameters, bf.perturbative_beta_function, ORDER
+        )
+        expected_continuum = bf.perturbative_beta_function(
+            test_x, loops=3
+        ) * (
+            1.0 + sum(
+                joint_parameters[f'c{power}'][0] * test_u**power
+                for power in PT_POWERS
+            )
+        )
+        np.testing.assert_allclose(
+            np.asarray(continuum, dtype=float), expected_continuum,
+            rtol=1e-13, atol=1e-13,
+        )
     expected_fixed_coefficients = {
         'fit8': {0: 1.0, 1: 0.0},
         'fit9': {0: 1.0, 2: 0.0},
@@ -612,6 +728,10 @@ if args.validate_only:
         )
         if not np.all(np.isfinite(smoke_prediction)) or not np.isfinite(smoke_fit.chi2):
             raise RuntimeError('No-prior interpolation smoke fit produced non-finite values.')
+    if WINDOWS[0] != (3.0, 4.0) or WINDOWS[-1] != (7.0, 8.0):
+        raise RuntimeError(f'Flow-time catalogue does not span 3 through 8: {WINDOWS}')
+    if THINNING_FLOW_SPACINGS != (0.01, 0.02, 0.05, 0.10, 0.20):
+        raise RuntimeError('Unexpected thinning-spacing catalogue.')
     print(f'validation successful: model={FIT_ID}, tag={MODEL_TAG}, parameters={parameter_names}')
     raise SystemExit(0)
 
@@ -773,7 +893,10 @@ def save_interpolation_diagnostics():
         )
 
 
-if FIT_ID in ('fit4', 'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11'):
+if FIT_ID in (
+    'fit4', 'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11',
+    'fit12',
+):
     save_interpolation_diagnostics()
 
 
@@ -1128,6 +1251,192 @@ plt.close(fig)
 # In[ ]:
 
 
+def run_fit12_continuum(window, mode):
+    """Run the joint, continuum-constrained Fit 12 linear GLS analysis."""
+    if mode not in ('diagonal', 'correlated'):
+        raise ValueError(f'Unsupported continuum mode: {mode}')
+
+    bf.continuum = bf._reset_stage(bf.continuum)
+    bf._assign_stage_aliases()
+    bf.continuum.model = None
+    bf.cnt_fcn = None
+    bf.mnt, bf.mxt = window
+    bf.continuum.metadata = {
+        'method': 'fit12_joint_linear_gls',
+        'window': tuple(window),
+        'g2_range': tuple(G2_GRID),
+        'cov_mode': 'kernel' if mode == 'correlated' else 'diagonal',
+        'kernel': 'rbf',
+        'tau0': float(config.tau0),
+        'constraints': {
+            'a0': 'z*A0', 'c0': '1 fixed for every z',
+            'coefficient_artifacts': 'none',
+        },
+        'parameters': {},
+    }
+
+    mng2, mxg2, dg2 = G2_GRID
+    decimals = max(0, -np.floor(np.log10(dg2)).astype(int))
+    g2_values = np.round(
+        np.arange(mng2, mxg2 + 0.5 * dg2, dg2), decimals
+    )
+    perturbative = bf.perturbative_beta_function
+    parameter_names = fit12_model.joint_parameter_names(ORDER)
+    n_parameters = len(parameter_names)
+    ntrp_eval = bf._wrap_model(bf.ntrp_fcn)
+
+    for operator in OBSERVABLES:
+        groups = []
+        for g2 in g2_values:
+            times = [
+                time for time in bf.ntrp_fits[FLOW][operator]
+                if float(time) - config.tau0 > 0.0
+                and window[0] <= float(time) - config.tau0 <= window[1]
+                and bf.ntrp_nf[FLOW][operator][time][0]
+                <= g2
+                <= bf.ntrp_nf[FLOW][operator][time][-1]
+            ]
+            if len(times) < 2:
+                continue
+            times.sort(key=float)
+            measured = np.asarray([float(time) for time in times])
+            nominal = measured - config.tau0
+            z = 1.0 / nominal
+            jacobian = nominal / measured
+            y = np.asarray([
+                factor * ntrp_eval(
+                    float(g2), bf.ntrp_fits[FLOW][operator][time]
+                )
+                for factor, time in zip(jacobian, times)
+            ], dtype=object)
+            g2_array = np.full(len(times), float(g2))
+            design = fit12_model.joint_design_matrix(
+                g2_array, z, perturbative, ORDER
+            )
+            target_mean = gv.mean(y) - np.asarray(
+                perturbative(g2_array, loops=3), dtype=float
+            )
+            distances = [
+                np.subtract.outer(np.log(nominal), np.log(nominal))
+            ]
+            weight_covariance = bf._weight_covariance(
+                y,
+                cov_mode='kernel' if mode == 'correlated' else 'diagonal',
+                kernel='rbf',
+                distances=distances,
+            )
+            weight_covariance = 0.5 * (
+                weight_covariance + weight_covariance.T
+            )
+            groups.append({
+                'g2': float(g2), 'times': times, 'z': z, 'y': y,
+                'design': design, 'target_mean': target_mean,
+                'weight_covariance': weight_covariance,
+            })
+
+        if not groups:
+            raise RuntimeError(
+                f'Fit12 {window} {mode} {operator}: no continuum points'
+            )
+
+        solution = fit12_model.solve_linear_gls(
+            [group['design'] for group in groups],
+            [group['target_mean'] for group in groups],
+            [group['weight_covariance'] for group in groups],
+        )
+        rank = solution['rank']
+        if rank != n_parameters:
+            raise RuntimeError(
+                f'Fit12 {window} {mode} {operator}: joint design rank '
+                f'{rank} is smaller than {n_parameters}'
+            )
+        parameter_mean = solution['coefficients']
+
+        if mode == 'diagonal':
+            # Match the existing diagonal continuum definition: both the
+            # weighting and the propagated parameter covariance are diagonal-
+            # data based.  The joint coefficients remain mutually correlated
+            # through the global design matrix.
+            parameter_values = np.asarray(gv.gvar(
+                parameter_mean, solution['information_inverse']
+            ), dtype=object)
+        else:
+            # For the correlated result, retain correlations with the original
+            # interpolation gvars while using the kernel covariance for GLS
+            # weighting, exactly as _correlated_weighted_fit does.
+            parameter_values = np.asarray(parameter_mean, dtype=object)
+            for group, gain in zip(groups, solution['gains']):
+                parameter_values += gain.dot(
+                    group['y'] - gv.mean(group['y'])
+                )
+        parameters = {
+            name: [parameter_values[index]]
+            for index, name in enumerate(parameter_names)
+        }
+
+        chi2 = solution['chi2']
+        n_data = solution['n_data']
+        dof = max(n_data - rank, 0)
+        quality = {
+            'chi2': chi2,
+            'dof': dof,
+            'p-value': (
+                float(chi2_distribution.sf(chi2, dof)) if dof else np.nan
+            ),
+            'logGBF': None,
+        }
+
+        bf.g2s.setdefault(FLOW, {})[operator] = []
+        bf.betas.setdefault(FLOW, {})[operator] = []
+        bf.cnt_fits.setdefault(FLOW, {})[operator] = []
+        bf.continuum.quality.setdefault(FLOW, {})[operator] = []
+        for group in groups:
+            g2 = group['g2']
+            beta = np.asarray(fit12_model.continuum_beta(
+                np.asarray([g2]), parameters, perturbative, ORDER
+            ), dtype=object)[0]
+            slope = np.asarray(fit12_model.lattice_slope(
+                np.asarray([g2]), parameters, perturbative, ORDER
+            ), dtype=object)[0]
+            bf.g2s[FLOW][operator].append(g2)
+            bf.betas[FLOW][operator].append(beta)
+            bf.cnt_fits[FLOW][operator].append({
+                'beta': [beta], 'slope': [slope]
+            })
+            bf.continuum.quality[FLOW][operator].append(copy.deepcopy(quality))
+            key = str(float(g2))
+            bf.continuum.store(
+                'domains', (FLOW, operator, key), list(group['times'])
+            )
+            bf.continuum.store(
+                'inputs', (FLOW, operator, key),
+                betafn.FitInput(
+                    x=np.asarray(group['z']),
+                    y=np.asarray(group['y'], dtype=object),
+                    labels=list(group['times']),
+                ),
+            )
+
+        bf.continuum.metadata['parameters'][operator] = parameters
+        bf.continuum.metadata.setdefault('quality', {})[operator] = quality
+        bf.continuum.metadata.setdefault(
+            'normalized_design_condition', {}
+        )[operator] = solution['normalized_condition']
+
+
+def run_continuum_case(window, mode):
+    """Run one continuum case using the active fit's continuum model."""
+    if FIT_ID == 'fit12':
+        run_fit12_continuum(window, mode)
+        return
+    options = THINNING_CONTINUUM_CASES[mode]
+    bf.cnt_xtrp(
+        mnt=window[0], mxt=window[1],
+        mng2=G2_GRID[0], mxg2=G2_GRID[1], dg2=G2_GRID[2],
+        tau0=config.tau0, v=0, **options,
+    )
+
+
 def snapshot_case(window, mode):
     payload = {
         'window': window, 'mode': mode, 'fit_id': FIT_ID,
@@ -1137,6 +1446,7 @@ def snapshot_case(window, mode):
         'pt_powers': PT_POWERS,
         'g2s': copy.deepcopy(bf.g2s), 'betas': copy.deepcopy(bf.betas),
         'cnt_fits': copy.deepcopy(bf.cnt_fits), 'cnt_qof': copy.deepcopy(bf.continuum.quality),
+        'domains': copy.deepcopy(bf.continuum.domains),
         'metadata': copy.deepcopy(bf.continuum.metadata),
     }
     path = case_dir(window, mode) / 'continuum_case.gvar'
@@ -1150,13 +1460,9 @@ def load_case(window, mode):
 
 mng2, mxg2, dg2 = G2_GRID
 for window in WINDOWS:
-    bf.cnt_xtrp(mnt=window[0], mxt=window[1], mng2=mng2, mxg2=mxg2, dg2=dg2,
-                 cov_mode='diagonal', diagonal=True, correlated=False,
-                 error_mode='fit', tau0=config.tau0, v=0)
+    run_continuum_case(window, 'diagonal')
     snapshot_case(window, 'diagonal')
-    bf.cnt_xtrp(mnt=window[0], mxt=window[1], mng2=mng2, mxg2=mxg2, dg2=dg2,
-                 cov_mode='kernel', diagonal=False, correlated=True,
-                 error_mode='fit', tau0=config.tau0, v=0)
+    run_continuum_case(window, 'correlated')
     snapshot_case(window, 'correlated')
     print('saved', window)
     gc.collect()
@@ -1434,6 +1740,69 @@ for window in WINDOWS:
 # In[ ]:
 
 
+def continuum_panel_times(case, window, operator, g2, tau0):
+      """Return exact fit times and one valid hollow point on either side."""
+      all_times = sorted(
+          bf.ntrp_fits[FLOW][operator],
+          key=float,
+      )
+      valid_times = [
+          time
+          for time in all_times
+          if float(time) - tau0 > 0.0
+          and bf.ntrp_nf[FLOW][operator][time][0]
+          <= g2
+          <= bf.ntrp_nf[FLOW][operator][time][-1]
+      ]
+
+      # The continuum stage records the exact labels supplied to each fit.
+      # Use those labels rather than reconstructing the selection for plots.
+      domain_by_g2 = (
+          case.get('domains', {})
+          .get(FLOW, {})
+          .get(operator, {})
+      )
+      fit_times = []
+      if domain_by_g2:
+          domain_key = min(
+              domain_by_g2,
+              key=lambda key: abs(float(key) - g2),
+          )
+          if np.isclose(float(domain_key), g2, rtol=0.0, atol=1e-12):
+              fit_times = list(domain_by_g2[domain_key])
+
+      # Backward compatibility for continuum_case.gvar files created before
+      # exact continuum domains were included in the snapshot.
+      if not fit_times:
+          fit_times = [
+              time
+              for time in valid_times
+              if window[0] <= float(time) - tau0 <= window[1]
+          ]
+      fit_times = sorted(fit_times, key=float)
+
+      # Display at most one unused point on each side, nearest to one flow-time
+      # unit beyond the fit window. Do not draw the whole neighboring interval.
+      outside_times = []
+      neighbor_specs = (
+          (window[0] - 1.0, lambda nominal: nominal < window[0]),
+          (window[1] + 1.0, lambda nominal: nominal > window[1]),
+      )
+      for target, is_on_side in neighbor_specs:
+          candidates = [
+              time
+              for time in valid_times
+              if is_on_side(float(time) - tau0)
+          ]
+          if candidates:
+              outside_times.append(min(
+                  candidates,
+                  key=lambda time: abs((float(time) - tau0) - target),
+              ))
+
+      return fit_times, outside_times
+
+
 def plot_continuum_panels(window, mode, divide_by_g4):
       case = load_case(window, mode)
       fig, axes = plt.subplots(2, 4, figsize=(18, 9))
@@ -1469,41 +1838,9 @@ def plot_continuum_panels(window, mode, divide_by_g4):
 
               params = case['cnt_fits'][FLOW][operator][idx]
 
-              all_times = sorted(
-                  bf.ntrp_fits[FLOW][operator],
-                  key=float,
+              fit_times, outside_times = continuum_panel_times(
+                  case, window, operator, g2, tau0
               )
-
-              # Reproduce the exact flow-time and interpolation-domain selection
-              # used by cnt_xtrp.
-              fit_times = [
-                  time
-                  for time in all_times
-                  if float(time) - tau0 > 0.0
-                  and window[0] <= float(time) - tau0 <= window[1]
-                  and bf.ntrp_nf[FLOW][operator][time][0]
-                  <= g2
-                  <= bf.ntrp_nf[FLOW][operator][time][-1]
-              ]
-
-              # Show one additional flow-time unit on either side as hollow
-              # points. These points are displayed but were not used in the fit.
-              outside_times = [
-                  time
-                  for time in all_times
-                  if float(time) - tau0 > 0.0
-                  and window[0] - 1.0
-                  <= float(time) - tau0
-                  <= window[1] + 1.0
-                  and not (
-                      window[0]
-                      <= float(time) - tau0
-                      <= window[1]
-                  )
-                  and bf.ntrp_nf[FLOW][operator][time][0]
-                  <= g2
-                  <= bf.ntrp_nf[FLOW][operator][time][-1]
-              ]
 
               def continuum_plot_values(times):
                   nominal_times = np.asarray(
@@ -1553,7 +1890,7 @@ def plot_continuum_panels(window, mode, divide_by_g4):
                       zorder=4,
                   )
 
-              # Hollow points: valid neighboring points outside the fit window.
+              # Hollow points: nearest valid points at tmin-1 and tmax+1.
               if outside_times:
                   xoutside, youtside = continuum_plot_values(outside_times)
 
@@ -1657,7 +1994,7 @@ def plot_continuum_panels(window, mode, divide_by_g4):
               + correction_label
               + '\n'
               + 'Filled points: included in fit; '
-              + 'hollow points: neighboring flow times not included in fit'
+              + 'hollow points: nearest valid times at one unit outside fit window'
           ),
           fontsize=11,
           color='gray',
@@ -2163,6 +2500,509 @@ for window in WINDOWS:
       )
 
 
+# ## Supplemental continuum-flow-time thinning study
+
+
+THINNING_ROOT = OUTPUT_ROOT / 'continuum_thinning_scan'
+
+
+def thinning_spacing_tag(spacing):
+    return f'dt_{spacing:.2f}'.replace('.', 'p')
+
+
+def thinning_spacing_dir(spacing):
+    path = THINNING_ROOT / thinning_spacing_tag(spacing)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def thinning_window_dir(spacing, window):
+    path = thinning_spacing_dir(spacing) / window_tag(window)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def thinning_mode_dir(spacing, window, mode):
+    path = thinning_window_dir(spacing, window) / mode
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def select_thinned_flow_times(available_times, window, spacing):
+    """Choose available fit times nearest a boundary-anchored regular grid."""
+    available = sorted(
+        [
+            time for time in available_times
+            if window[0] <= float(time) - config.tau0 <= window[1]
+        ],
+        key=float,
+    )
+    if not available:
+        return []
+    targets = list(np.arange(
+        window[0], window[1] + 0.5 * spacing, spacing
+    ))
+    if not np.isclose(targets[-1], window[1], rtol=0.0, atol=1e-10):
+        targets.append(float(window[1]))
+    selected = []
+    for target in targets:
+        nearest = min(
+            available,
+            key=lambda time: abs((float(time) - config.tau0) - target),
+        )
+        if nearest not in selected:
+            selected.append(nearest)
+    for endpoint in (available[0], available[-1]):
+        if endpoint not in selected:
+            selected.append(endpoint)
+    return sorted(selected, key=float)
+
+
+def _copy_interpolation_subset(container, visible_times):
+    subset = {}
+    for flow, by_operator in container.items():
+        subset[flow] = {}
+        for operator, by_time in by_operator.items():
+            keep = visible_times.get((flow, operator), tuple(by_time))
+            subset[flow][operator] = {
+                time: value for time, value in by_time.items() if time in keep
+            }
+    return subset
+
+
+@contextmanager
+def use_thinned_interpolation_times(window, spacing):
+    """Expose selected fit points plus outside points needed for plotting."""
+    original_fits = bf.interpolation.fits
+    original_domains = bf.interpolation.domains
+    selected_fit_times = {}
+    visible_times = {}
+    for flow, by_operator in original_fits.items():
+        for operator, by_time in by_operator.items():
+            if flow == FLOW and operator in OBSERVABLES:
+                selected = select_thinned_flow_times(
+                    by_time, window, spacing
+                )
+                if len(selected) < 3:
+                    raise RuntimeError(
+                        f'{window}, {operator}, dt={spacing}: fewer than three '
+                        'flow-time points remain for the continuum fit'
+                    )
+                outside = [
+                    time for time in by_time
+                    if not window[0]
+                    <= float(time) - config.tau0
+                    <= window[1]
+                ]
+                selected_fit_times[(flow, operator)] = tuple(selected)
+                visible_times[(flow, operator)] = tuple(selected + outside)
+            else:
+                selected_fit_times[(flow, operator)] = tuple(by_time)
+                visible_times[(flow, operator)] = tuple(by_time)
+    bf.interpolation.fits = _copy_interpolation_subset(
+        original_fits, visible_times
+    )
+    bf.interpolation.domains = _copy_interpolation_subset(
+        original_domains, visible_times
+    )
+    bf._assign_stage_aliases()
+    try:
+        yield selected_fit_times
+    finally:
+        bf.interpolation.fits = original_fits
+        bf.interpolation.domains = original_domains
+        bf._assign_stage_aliases()
+
+
+def snapshot_thinning_case(window, spacing, mode):
+    """Keep the exact thinning result in memory for immediate plotting.
+
+    Do not round-trip these transient correlated gvars through disk: the
+    notebook uses this in-memory pattern specifically to avoid covariance
+    asymmetry introduced by serialization/reloading on some gvar versions.
+    """
+    payload = {
+        'window': tuple(window), 'spacing': float(spacing), 'mode': mode,
+        'fit_id': FIT_ID, 'model_tag': MODEL_TAG, 'model_order': ORDER,
+        'pt_powers': PT_POWERS,
+        'g2s': copy.deepcopy(bf.g2s),
+        'betas': copy.deepcopy(bf.betas),
+        'cnt_fits': copy.deepcopy(bf.cnt_fits),
+        'cnt_qof': copy.deepcopy(bf.continuum.quality),
+        'domains': copy.deepcopy(bf.continuum.domains),
+        'metadata': copy.deepcopy(bf.continuum.metadata),
+    }
+    return payload
+
+
+def _correlation_diagnostics(covariance):
+    covariance = np.asarray(covariance, dtype=float)
+    covariance = 0.5 * (covariance + covariance.T)
+    scales = np.sqrt(np.clip(np.diag(covariance), 0.0, None))
+    if len(scales) == 0 or np.any(scales <= 0.0):
+        return {'condition': np.inf, 'effective_rank': 0.0}
+    correlation = covariance / np.outer(scales, scales)
+    correlation = 0.5 * (correlation + correlation.T)
+    eigenvalues = np.clip(np.linalg.eigvalsh(correlation), 0.0, None)
+    denominator = float(np.sum(eigenvalues**2))
+    return {
+        'condition': float(np.linalg.cond(correlation)),
+        'effective_rank': (
+            float(np.sum(eigenvalues)**2 / denominator)
+            if denominator > 0.0 else 0.0
+        ),
+    }
+
+
+def _eligible_full_times(full_fits, full_domains, operator, window, g2):
+    return [
+        time for time in full_fits[FLOW][operator]
+        if float(time) - config.tau0 > 0.0
+        and window[0] <= float(time) - config.tau0 <= window[1]
+        and full_domains[FLOW][operator][time][0]
+        <= g2
+        <= full_domains[FLOW][operator][time][-1]
+    ]
+
+
+def collect_thinning_diagnostics(
+    window, spacing, mode, options, full_fits, full_domains,
+):
+    rows = []
+    ntrp_eval = bf._wrap_model(bf.ntrp_fcn)
+    for operator in OBSERVABLES:
+        grid = np.asarray(bf.g2s[FLOW][operator], dtype=float)
+        for index, g2 in enumerate(grid):
+            fit_input = bf.continuum.fetch(
+                'inputs', (FLOW, operator, str(float(g2)))
+            )
+            times = list(fit_input.labels)
+            measured = np.asarray([float(time) for time in times])
+            nominal = measured - config.tau0
+            jacobian = nominal / measured
+            beta_values = np.asarray([
+                factor * ntrp_eval(
+                    g2, bf.ntrp_fits[FLOW][operator][time]
+                )
+                for factor, time in zip(jacobian, times)
+            ], dtype=object)
+            empirical_covariance = gv.evalcov(beta_values)
+            distances = [
+                np.subtract.outer(np.log(nominal), np.log(nominal))
+            ]
+            weight_covariance = bf._weight_covariance(
+                beta_values,
+                cov_mode=options['cov_mode'],
+                alpha=options.get('alpha', 0.25),
+                kernel=options.get('kernel', 'rbf'),
+                distances=distances,
+            )
+            empirical = _correlation_diagnostics(empirical_covariance)
+            weighted = _correlation_diagnostics(weight_covariance)
+            quality = bf.continuum.quality[FLOW][operator][index]
+            full_count = len(_eligible_full_times(
+                full_fits, full_domains, operator, window, g2
+            ))
+            if full_count == 0:
+                raise RuntimeError(
+                    f'No full flow-time support for {window}, {operator}, {g2}'
+                )
+            rows.append({
+                'window': window_tag(window),
+                'spacing': float(spacing),
+                'mode': mode,
+                'operator': operator,
+                'g2': float(g2),
+                'n_full': int(full_count),
+                'n_retained': int(len(times)),
+                'retained_fraction': float(len(times) / full_count),
+                'empirical_correlation_condition': empirical['condition'],
+                'empirical_effective_rank': empirical['effective_rank'],
+                'weight_correlation_condition': weighted['condition'],
+                'weight_effective_rank': weighted['effective_rank'],
+                'chi2': float(quality['chi2']),
+                'dof': int(quality['dof']),
+                'chi2_per_dof': (
+                    float(quality['chi2'] / quality['dof'])
+                    if quality['dof'] else np.nan
+                ),
+                'p_value': float(quality['p-value']),
+            })
+    return rows
+
+
+def _save_thinning_figure(fig, window, spacing, name, mode=None):
+    directory = (
+        thinning_mode_dir(spacing, window, mode)
+        if mode is not None else thinning_window_dir(spacing, window)
+    )
+    base = directory / name
+    if FIT_FOOTER is not None:
+        fig.text(
+            0.995, 0.005, FIT_FOOTER, ha='right', va='bottom',
+            fontsize=8, color='gray', alpha=.75,
+        )
+    fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
+    fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
+    plt.close(fig)
+
+
+def plot_thinning_continuum_quality(case, window, spacing, mode):
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
+    for operator in OBSERVABLES:
+        grid = np.asarray(case['g2s'][FLOW][operator], dtype=float)
+        quality = case['cnt_qof'][FLOW][operator]
+        chi = np.asarray([
+            row['chi2'] / row['dof'] if row['dof'] else np.nan
+            for row in quality
+        ], dtype=float)
+        pvalues = np.asarray(
+            [row['p-value'] for row in quality], dtype=float
+        )
+        count = min(len(grid), len(chi), len(pvalues))
+        ax1.plot(
+            grid[:count], chi[:count], '-',
+            color=OP_COLORS[operator], lw=1.2,
+        )
+        ax1.scatter(
+            grid[:count], chi[:count], color=OP_COLORS[operator],
+            s=28, zorder=3, label=OP_LABELS[operator],
+        )
+        ax2.plot(
+            grid[:count], pvalues[:count], '-',
+            color=OP_COLORS[operator], lw=1.2,
+        )
+        ax2.scatter(
+            grid[:count], pvalues[:count],
+            color=OP_COLORS[operator], s=28, zorder=3,
+        )
+    ax1.axhline(1, color='gray', ls='--')
+    ax2.axhline(.05, color='gray', ls='--')
+    ax1.set_ylabel(r'$\chi^2/{\rm dof}$')
+    ax2.set_ylabel(r'$p$-value')
+    ax2.set_xlabel(r'$g^2_{GF}$')
+    ax1.legend(frameon=False)
+    mode_label = (
+        'Correlated continuum QoF'
+        if mode == 'correlated' else 'Diagonal continuum QoF'
+    )
+    for ax in (ax1, ax2):
+        ax.text(
+            .50, .52, 'Preliminary', transform=ax.transAxes,
+            fontsize=36, color='gray', alpha=.25, ha='center', va='center',
+            rotation=30, zorder=0,
+        )
+        ax.text(
+            .58, .15,
+            FIT_WATERMARK + '\n' + mode_label + '\n'
+            + rf'$t/a^2\in[{window[0]:g},{window[1]:g}]$'
+            + '\n' + rf'$\Delta(t/a^2)={spacing:.2f}$',
+            transform=ax.transAxes, fontsize=10.5, color='gray', alpha=.92,
+            ha='center', va='center', fontweight='bold',
+        )
+    _save_thinning_figure(
+        fig, window, spacing, f'continuum_quality_{FIT_ID}', mode
+    )
+
+
+def plot_thinning_diagonal_vs_correlated(cases, window, spacing):
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for operator in OBSERVABLES:
+        for mode, linestyle in (('diagonal', '--'), ('correlated', '-')):
+            case = cases[mode]
+            x = np.asarray(case['g2s'][FLOW][operator], dtype=float)
+            y = np.asarray(
+                case['betas'][FLOW][operator], dtype=object
+            ) / x**2
+            order = np.argsort(x)
+            x, y = x[order], y[order]
+            mean, sdev = gv.mean(y), gv.sdev(y)
+            ax.plot(
+                x, mean, color=OP_COLORS[operator], ls=linestyle, lw=1.8,
+                label=f'{OP_LABELS[operator]} {mode}',
+                zorder=4 if mode == 'correlated' else 3,
+            )
+            ax.fill_between(
+                x, mean - sdev, mean + sdev, color=OP_COLORS[operator],
+                alpha=.18 if mode == 'correlated' else .07,
+                linewidth=0, zorder=2 if mode == 'correlated' else 1,
+            )
+    xp = np.linspace(.001, 5.0, 500)
+    for loops, linestyle, label in (
+        (1, '-', '1-loop universal'),
+        (2, '--', '2-loop universal'),
+        (3, '-.', '3-loop gradient flow'),
+    ):
+        ax.plot(
+            xp, pt_over_g4(xp, loops), color='gray', ls=linestyle,
+            lw=1.5, label=label, zorder=1,
+        )
+    ax.text(
+        .50, .52, 'Preliminary', transform=ax.transAxes,
+        fontsize=42, color='gray', alpha=.25, ha='center', va='center',
+        rotation=30, zorder=20, clip_on=True,
+    )
+    ax.text(
+        .58, .15,
+        FIT_WATERMARK + '\nDiagonal vs correlated continuum\n'
+        + rf'$t/a^2\in[{window[0]:g},{window[1]:g}]$'
+        + '\n' + rf'$\Delta(t/a^2)={spacing:.2f}$'
+        + '\nSolid: correlated; dashed: diagonal',
+        transform=ax.transAxes, fontsize=10.5, color='gray', alpha=.82,
+        ha='center', va='center', fontweight='bold', zorder=20,
+        clip_on=True,
+    )
+    ax.set(
+        xlim=(0, 4.8), xlabel=r'$g^2_{GF}$',
+        ylabel=r'$\beta_{GF}/g_{GF}^4$',
+    )
+    ax.legend(ncol=2, frameon=False)
+    _save_thinning_figure(
+        fig, window, spacing, f'diagonal_vs_correlated_{FIT_ID}'
+    )
+
+
+def plot_thinning_case_family(cases, window, spacing):
+    """Reuse the main continuum plot functions with thinning output paths."""
+    reference_load_case = globals()['load_case']
+    reference_save_figure = globals()['save_figure']
+    reference_watermark = globals()['FIT_WATERMARK']
+    try:
+        globals()['load_case'] = lambda requested_window, mode: cases[mode]
+        globals()['save_figure'] = (
+            lambda fig, requested_window, name, mode=None:
+            _save_thinning_figure(
+                fig, requested_window, spacing, name, mode
+            )
+        )
+        globals()['FIT_WATERMARK'] = (
+            reference_watermark
+            + rf'; thinning $\Delta(t/a^2)={spacing:.2f}$'
+        )
+        for mode in ('diagonal', 'correlated'):
+            plot_continuum_panels(window, mode, divide_by_g4=False)
+            plot_continuum_panels(window, mode, divide_by_g4=True)
+            plot_final_curve(window, mode, divide_by_g4=False)
+            plot_final_curve(window, mode, divide_by_g4=True)
+    finally:
+        globals()['load_case'] = reference_load_case
+        globals()['save_figure'] = reference_save_figure
+        globals()['FIT_WATERMARK'] = reference_watermark
+    for mode in ('diagonal', 'correlated'):
+        plot_thinning_continuum_quality(
+            cases[mode], window, spacing, mode
+        )
+    plot_thinning_diagonal_vs_correlated(cases, window, spacing)
+
+
+def run_continuum_thinning_study():
+    THINNING_ROOT.mkdir(parents=True, exist_ok=True)
+    thinning_rows = []
+    thinning_selections = []
+    reference_continuum = bf.continuum
+    reference_interpolation_fits = bf.interpolation.fits
+    reference_interpolation_domains = bf.interpolation.domains
+    try:
+        for spacing in THINNING_FLOW_SPACINGS:
+            print(f'\n=== thinning {thinning_spacing_tag(spacing)} ===')
+            spacing_selections = []
+            for window in WINDOWS:
+                with use_thinned_interpolation_times(
+                    window, spacing
+                ) as selections:
+                    for operator in OBSERVABLES:
+                        selected = selections[(FLOW, operator)]
+                        selection_row = {
+                            'window': window_tag(window),
+                            'spacing': float(spacing),
+                            'operator': operator,
+                            'n_selected_before_domain_restrictions': len(selected),
+                            'selected_times': ','.join(map(str, selected)),
+                        }
+                        thinning_selections.append(selection_row)
+                        spacing_selections.append(selection_row)
+                    cases = {}
+                    for mode, options in THINNING_CONTINUUM_CASES.items():
+                        run_continuum_case(window, mode)
+                        cases[mode] = snapshot_thinning_case(
+                            window, spacing, mode
+                        )
+                        thinning_rows.extend(collect_thinning_diagnostics(
+                            window, spacing, mode, options,
+                            reference_interpolation_fits,
+                            reference_interpolation_domains,
+                        ))
+                        print(
+                            'fitted', thinning_spacing_tag(spacing),
+                            window_tag(window), mode,
+                        )
+                    plot_thinning_case_family(cases, window, spacing)
+                    print(
+                        'saved plots', thinning_spacing_tag(spacing),
+                        window_tag(window),
+                    )
+                    del cases
+                    gc.collect()
+            pd.DataFrame(spacing_selections).to_csv(
+                thinning_spacing_dir(spacing) / 'selected_flow_times.csv',
+                index=False,
+            )
+    finally:
+        bf.interpolation.fits = reference_interpolation_fits
+        bf.interpolation.domains = reference_interpolation_domains
+        bf.continuum = reference_continuum
+        bf._assign_stage_aliases()
+
+    thinning_diagnostics = pd.DataFrame(thinning_rows)
+    thinning_diagnostics.to_csv(
+        THINNING_ROOT / 'continuum_thinning_diagnostics.csv', index=False
+    )
+    thinning_summary = (
+        thinning_diagnostics
+        .groupby(['window', 'mode', 'spacing'], as_index=False)
+        .agg(
+            fits=('g2', 'size'),
+            median_n_retained=('n_retained', 'median'),
+            median_retained_fraction=('retained_fraction', 'median'),
+            median_empirical_condition=(
+                'empirical_correlation_condition', 'median'
+            ),
+            median_weight_condition=('weight_correlation_condition', 'median'),
+            mean_chi2_per_dof=('chi2_per_dof', 'mean'),
+            median_p_value=('p_value', 'median'),
+        )
+    )
+    thinning_summary.to_csv(
+        THINNING_ROOT / 'continuum_thinning_summary.csv', index=False
+    )
+    configuration = {
+        'fit_id': FIT_ID,
+        'model_tag': MODEL_TAG,
+        'order': ORDER,
+        'fit4_no_priors': FIT_NO_PRIORS if FIT_ID == 'fit4' else None,
+        'fit4_width': FIT_WIDTH if FIT_ID == 'fit4' else None,
+        'interpolation_xerrors': config.interpolation.xerrors,
+        'flow_time_spacings': list(THINNING_FLOW_SPACINGS),
+        'continuum_cases': THINNING_CONTINUUM_CASES,
+        'windows': [list(window) for window in WINDOWS],
+        'g2_grid': list(G2_GRID),
+        'tau0': float(config.tau0),
+        'layout': 'dt_<spacing>/t_<window>/{diagonal,correlated}',
+        'reference_analysis_modified': False,
+    }
+    (THINNING_ROOT / 'run_configuration.json').write_text(
+        json.dumps(configuration, indent=2) + '\n'
+    )
+    print(thinning_summary.to_string(index=False))
+    print('thinning outputs:', THINNING_ROOT)
+    return thinning_summary
+
+
+thinning_summary = None
+if args.continuum_thinning:
+    thinning_summary = run_continuum_thinning_study()
+
+
 # ## Plot 11 — correlated weak-coupling extrapolation for every range
 # 
 # Point error bars are continuum-point uncertainties; colored bands are posterior uncertainties of the shared fitted curve and are not expected to coincide.
@@ -2197,7 +3037,7 @@ def ratio_model(x, p):
   if FIT_ID in ('fit8', 'fit9', 'fit10'):
       correction = selected_multiplicative_correction(u, p, 'c')
       return pt_over_g4(x, 3) * correction
-  prefix = 'c' if FIT_ID == 'fit4' else 'd'
+  prefix = 'c' if FIT_ID in ('fit4', 'fit12') else 'd'
   correction = 1.0 + sum(
       p[f'{prefix}{power}'][0] * u**power
       for power in PT_POWERS
@@ -2244,7 +3084,9 @@ for window in WINDOWS:
       continuum_mean = gv.mean(y)
       continuum_sdev = gv.sdev(y)
 
-      prefix = 'c' if FIT_ID in ('fit4', 'fit8', 'fit9', 'fit10', 'fit11') else 'd'
+      prefix = 'c' if FIT_ID in (
+          'fit4', 'fit8', 'fit9', 'fit10', 'fit11', 'fit12'
+      ) else 'd'
       parameters = {f'{prefix}{power}': [0.0] for power in PT_POWERS}
       if FIT_ID == 'fit6':
           parameters['b1'] = [0.0]
@@ -2469,7 +3311,7 @@ if args.reviewed_weak_coupling:
         pt_over_g4=pt_over_g4,
         load_case=load_case,
         save_figure=save_figure,
-        include_extended_to_zero=FIT_ID != 'fit11',
+        include_extended_to_zero=FIT_ID not in ('fit11', 'fit12'),
     )
     lambda_parameter_results = run_lambda_parameter_plots(
         bf=bf,
@@ -2518,6 +3360,13 @@ print(f'{FIT_ID} validation complete:',len(present),'continuum cases')
     'continuum_cases': len(present),
     'reviewed_weak_coupling': args.reviewed_weak_coupling,
     'lambda_parameter_outputs': lambda_parameter_results is not None,
+    'continuum_thinning': args.continuum_thinning,
+    'thinning_spacings': (
+        list(THINNING_FLOW_SPACINGS) if args.continuum_thinning else []
+    ),
+    'thinning_summary_rows': (
+        int(len(thinning_summary)) if thinning_summary is not None else 0
+    ),
     'elapsed_seconds': round(time_module.time() - RUN_STARTED, 3),
 }, indent=2) + '\n')
 

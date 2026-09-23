@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=nf4-pt
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --output=slurm_logs/%x-%j.out
@@ -14,16 +14,20 @@ set -euo pipefail
 : "${BETAFN_OUTPUT_BASE:?Set BETAFN_OUTPUT_BASE to an HPCC output directory.}"
 : "${BETAFN_VENV:?Set BETAFN_VENV to the Python virtual-environment directory.}"
 
-if [[ ! "${NF4_MODEL}" =~ ^fit(5|6|7|8|9|10|11)$ ]]; then
-  echo "NF4_MODEL must be fit5 through fit11; got ${NF4_MODEL}" >&2
+if [[ ! "${NF4_MODEL}" =~ ^fit(5|6|7|8|9|10|11|12)$ ]]; then
+  echo "NF4_MODEL must be fit5 through fit12; got ${NF4_MODEL}" >&2
   exit 2
 fi
 if [[ "${NF4_MODEL}" =~ ^fit(5|6|7)$ && "${NF4_ORDER}" != "1" && "${NF4_ORDER}" != "2" ]]; then
   echo "NF4_ORDER must be 1 or 2 for ${NF4_MODEL}; got ${NF4_ORDER}" >&2
   exit 2
 fi
-if [[ "${NF4_MODEL}" =~ ^fit(8|9|10|11)$ && "${NF4_ORDER}" != "3" && "${NF4_ORDER}" != "4" ]]; then
+if [[ "${NF4_MODEL}" =~ ^fit(8|9|10)$ && "${NF4_ORDER}" != "3" && "${NF4_ORDER}" != "4" ]]; then
   echo "NF4_ORDER must be 3 or 4 for ${NF4_MODEL}; got ${NF4_ORDER}" >&2
+  exit 2
+fi
+if [[ "${NF4_MODEL}" =~ ^fit(11|12)$ && "${NF4_ORDER}" != "3" && "${NF4_ORDER}" != "4" && "${NF4_ORDER}" != "5" ]]; then
+  echo "NF4_ORDER must be 3, 4, or 5 for ${NF4_MODEL}; got ${NF4_ORDER}" >&2
   exit 2
 fi
 
