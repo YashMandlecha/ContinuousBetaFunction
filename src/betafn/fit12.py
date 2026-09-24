@@ -1,9 +1,12 @@
-"""Fit 12 models with the perturbative continuum limit imposed exactly.
+"""Fit 12 finite-flow-time interpolation helpers.
 
-Fit 12 allows an additive beta-function constant at nonzero lattice spacing.
-Its lattice-spacing dependence is constrained so that the additive term
-vanishes in the continuum limit, while the multiplicative intercept is fixed
-to one at every lattice spacing.
+At one fixed flow time, ``z=a^2/t`` is a known nonzero constant, so a free
+``z*A0`` and a free ``a0`` span exactly the same interpolation model. The
+production runner stores the identifiable product as ``beta_const=a0=z*A0``
+and sends the evaluated curves to the ordinary per-coupling continuum
+extrapolation. It deliberately does not use the experimental joint helpers
+below, which impose extra shared-parameter constraints and are therefore not
+a pure reparameterization of Fit 11.
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ def interpolation_p0(order: int) -> dict[str, list[float]]:
 
 
 def interpolation_beta(x, parameters, perturbative, order: int):
-    """Evaluate beta = a0 + beta_PT3 * (1 + sum(c_n u^n))."""
+    """Evaluate beta using the identifiable product a0=z*A0."""
     x = np.asarray(x)
     u = x / perturbative.nrm
     correction = 1.0 + sum(
@@ -37,8 +40,42 @@ def interpolation_beta(x, parameters, perturbative, order: int):
     ) * correction
 
 
+def rescale_interpolation_parameters(parameters, z: float, order: int) -> dict:
+    """Change coordinates from the fitted product ``a0`` to ``(z, A0)``.
+
+    ``z`` is fixed for one finite-flow-time interpolation.  The returned
+    parameters therefore describe exactly the same curve, with
+    ``A0=a0/z``.  Keeping ``z`` alongside ``A0`` ensures every later
+    evaluation—including the continuum stage—reconstructs ``z*A0``.
+    """
+    _validate_order(order)
+    z = float(z)
+    if not np.isfinite(z) or z <= 0.0:
+        raise ValueError("Fit 12 requires a finite positive a^2/t value")
+    return {
+        "A0": [parameters["beta_const"][0] / z],
+        "_fit12_z": [z],
+        **{
+            f"pt_c{power}": [parameters[f"pt_c{power}"][0]]
+            for power in range(1, order + 1)
+        },
+    }
+
+
+def rescaled_interpolation_beta(x, parameters, perturbative, order: int):
+    """Evaluate the stored Fit 12 form with the explicit ``z*A0`` factor."""
+    x = np.asarray(x)
+    u = x / perturbative.nrm
+    correction = 1.0 + sum(
+        parameters[f"pt_c{power}"][0] * u**power
+        for power in range(1, order + 1)
+    )
+    additive = parameters["_fit12_z"][0] * parameters["A0"][0]
+    return additive + perturbative(x, loops=3) * correction
+
+
 def joint_parameter_names(order: int) -> tuple[str, ...]:
-    """Parameters in the joint (g^2, a^2/t) continuum model."""
+    """Parameters in the experimental, non-production joint model."""
     _validate_order(order)
     return ("A0",) + tuple(
         f"c{power}" for power in range(1, order + 1)

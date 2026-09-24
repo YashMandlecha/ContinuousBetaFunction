@@ -10,6 +10,8 @@ from betafn.fit12 import (
     joint_design_matrix,
     joint_parameter_names,
     lattice_slope,
+    rescale_interpolation_parameters,
+    rescaled_interpolation_beta,
     solve_linear_gls,
 )
 from betafn.perturbative import PerturbativeBetaFunction
@@ -26,6 +28,31 @@ def test_finite_spacing_interpolation_has_free_a0_and_fixed_c0():
     )
     np.testing.assert_allclose(
         interpolation_beta(x, parameters, perturbative, 3), expected
+    )
+
+
+def test_rescaling_free_constant_at_fixed_flow_time_is_invariant():
+    """Writing a0=z*A0 cannot change a finite-time interpolation curve."""
+    perturbative = PerturbativeBetaFunction(nf=4, nc=3)
+    x = np.asarray([1.0, 2.0, 4.0])
+    z = 0.2
+    a0 = 0.013
+    A0 = a0 / z
+    direct = interpolation_p0(4)
+    direct["beta_const"] = [a0]
+    for power in range(1, 5):
+        value = (-1.0) ** power * 0.1 * power
+        direct[f"pt_c{power}"] = [value]
+    rescaled = rescale_interpolation_parameters(direct, z, 4)
+
+    assert rescaled["A0"][0] == A0
+    assert rescaled["_fit12_z"][0] == z
+
+    np.testing.assert_allclose(
+        interpolation_beta(x, direct, perturbative, 4),
+        rescaled_interpolation_beta(x, rescaled, perturbative, 4),
+        rtol=0.0,
+        atol=0.0,
     )
 
 

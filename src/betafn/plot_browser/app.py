@@ -164,25 +164,34 @@ with st.expander("Interpolation models and priors", expanded=True):
         )
     with fit12_tab:
         st.markdown(
-            "**Finite-spacing additive artifact with the multiplicative "
-            "intercept fixed to one**"
+            "**Fit 11 constant reparameterized at each fixed flow time**"
         )
         st.latex(
-            r"\beta(x,z)=zA_0+\beta_{\rm PT}^{(3)}(x)"
-            r"\left[1+\sum_{n=1}^{N}c_nu^n\right],"
-            r"\qquad z=a^2/t,\quad N\in\{3,4,5\}"
+            r"\beta_j(x)=z_jA_{0,j}+\beta_{\rm PT}^{(3)}(x)"
+            r"\left[1+\sum_{n=1}^{N}c_{n,j}u^n\right],"
+            r"\qquad z_j=(a^2/t)_j,\quad N\in\{3,4,5\}"
         )
         st.markdown(
-            "Each finite-flow-time interpolation allows an independent "
-            "$a_0$ while fixing $c_0=1$. The joint continuum fit enforces "
-            "$a_0(z)=zA_0$, so $a_0\to0$ as $z\to0$. The continuum curve is "
-            "therefore "
-            r"$\beta_{\rm PT}^{(3)}(x)[1+\sum c_nu^n]$. "
-            "The $c_n$ are shared across all $z$; there are no additional "
-            "multiplicative cutoff coefficients. "
-            "All $A_0,c_n$ are unconstrained; there are no coefficient "
-            "priors and `xerrors=False`."
+            "Within interpolation $j$, $z_j$ is a known constant and "
+            "$A_{0,j}$ is free, so only the product "
+            "$a_{0,j}=z_jA_{0,j}$ is identifiable. This is exactly a change "
+            "of parameter coordinates relative to Fit 11: it must not change "
+            "the fitted interpolation curve. The evaluated curves are passed "
+            "unchanged to the same per-$g^2$ linear continuum extrapolation "
+            "used by Fit 11. Parameters are independent between flow times; "
+            "there is no global shared-$A_0$ or shared-$c_n$ continuum fit. "
+            "All coefficients are unconstrained, with no priors and "
+            "`xerrors=False`."
         )
+
+    st.info(
+        "**Fit 11 versus Fit 12:** both use the same multiplicative Fit 4 "
+        "correction and the same standard continuum extrapolation. Fit 11 "
+        "fits the finite-time constant directly as $a_{0,j}$; Fit 12 writes "
+        "the same constant as $z_jA_{0,j}$. Because $z_j$ is fixed within "
+        "each interpolation, the two fitted curves and continuum results "
+        "should agree up to numerical precision."
+    )
 
     st.markdown("**Fixed $N_f=4$, SU(3), gradient-flow perturbative reference**")
     st.latex(
@@ -201,7 +210,7 @@ with st.expander("Interpolation models and priors", expanded=True):
         r"$x=0.9,1.0,\ldots,4.9$; all 15 integer flow-time windows from "
         "$[3,4]$ through $[7,8]$ are analyzed with both diagonal and "
         "kernel-correlated continuum fits. Each run also performs the five "
-        r"flow-time thinning tests $\Delta(t/a^2)=0.01,0.02,0.05,0.10,0.20$."
+        r"flow-time thinning tests $\Delta(t/a^2)=0.05,0.10,0.20$."
     )
     st.markdown(
         "| Variant | Output model tag | Fitted parameters |\n"
@@ -221,9 +230,9 @@ with st.expander("Interpolation models and priors", expanded=True):
         "| fit11 order 3 | `order_3_additive_beta_constant_nopriors` | $a_0,c_1,c_2,c_3$ |\n"
         "| fit11 order 4 | `order_4_additive_beta_constant_nopriors` | $a_0,c_1,c_2,c_3,c_4$ |\n"
         "| fit11 order 5 | `order_5_additive_beta_constant_nopriors` | $a_0,c_1,c_2,c_3,c_4,c_5$ |\n"
-        "| fit12 order 3 | `order_3_joint_a0_continuum_nopriors` | $A_0,c_1,c_2,c_3$ |\n"
-        "| fit12 order 4 | `order_4_joint_a0_continuum_nopriors` | $A_0,c_1,c_2,c_3,c_4$ |\n"
-        "| fit12 order 5 | `order_5_joint_a0_continuum_nopriors` | $A_0,c_1,c_2,c_3,c_4,c_5$ |"
+        "| fit12 order 3 | `order_3_rescaled_a0_standard_continuum_nopriors` | $A_{0,j},c_1,c_2,c_3$ |\n"
+        "| fit12 order 4 | `order_4_rescaled_a0_standard_continuum_nopriors` | $A_{0,j},c_1,c_2,c_3,c_4$ |\n"
+        "| fit12 order 5 | `order_5_rescaled_a0_standard_continuum_nopriors` | $A_{0,j},c_1,c_2,c_3,c_4,c_5$ |"
     )
 
 

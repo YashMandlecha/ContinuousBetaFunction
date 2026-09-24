@@ -6,8 +6,11 @@
 # Updated upstream analysis (`2af131f`), Wilson flow, on-the-fly TLN,
 # three-volume infinite-volume limit, and exhaustive integer flow-time-window
 # scan for Fits 4--12.  The selected model is recorded in
-# `run_configuration.json`; Fit12 additionally imposes a0(z)=z*A0 and fixes
-# c0=1 at every lattice spacing, with z=a^2/t.
+# `run_configuration.json`.  Fit12 is the finite-flow-time reparameterization
+# a0=z*A0, with z=a^2/t and c0=1.  Because z is constant within each
+# interpolation and A0 is independently free there, the identifiable fitted
+# quantity is a0=z*A0.  Its evaluated interpolation is passed unchanged to the
+# same per-g^2 continuum extrapolation used by the other fits.
 # 
 # Every plot family has its own cell. Outputs are organized as `fit4/order_4/t_<min>_<max>/<mode>/`, where mode is `diagonal` or `correlated`. The correlated result uses the upstream kernel covariance. Rectangle measurements are combined at the raw-history level into the Symanzik observable before its dedicated TLN correction.
 
@@ -106,7 +109,7 @@ parser.add_argument(
     '--continuum-thinning',
     action=argparse.BooleanOptionalAction,
     default=True,
-    help='Run the five-spacing continuum flow-time thinning study.',
+    help='Run the three-spacing continuum flow-time thinning study.',
 )
 parser.add_argument('--validate-only', action='store_true', help='Validate configuration/model construction, then exit.')
 args = parser.parse_args()
@@ -243,23 +246,25 @@ elif FIT_ID == 'fit11':
         rf'fit11, free additive $\beta$ constant + fit4 order {ORDER}, no priors'
     )
 else:
-    # At finite lattice spacing z=a^2/t, Fit12 permits
-    #   a0(z)=z*A0 and c0(z)=1.
-    # Thus the continuum limit has a0(0)=0 and c0=1 exactly.  The c_n are
-    # shared across all z; z*A0 is the only explicit cutoff term.
+    # At each fixed flow time z=a^2/t is a known constant, so fitting z*A0
+    # with free A0 is exactly equivalent to fitting the identifiable product
+    # a0=z*A0.  Crucially, A0 (and the c_n) remain independent between the
+    # finite-flow-time interpolations.  The evaluated interpolation curves are
+    # then sent to the ordinary per-g^2 linear continuum extrapolation; Fit12
+    # must not impose an additional global A0 or shared-c_n continuum fit.
     ORDER = args.fit12_order
     FIT_WIDTH = None
     FIT_NO_PRIORS = True
     FIT_PRIOR_COUNT = 0
     FIT_FOOTER = (
-        'joint continuum constraint a0=z*A0; c0=1 and c_n shared across z; '
-        'no coefficient priors, xerrors=False'
+        'finite-time reparameterization a0=z*A0; c0=1; standard per-g2 '
+        'continuum extrapolation; no coefficient priors, xerrors=False'
     )
     PT_POWERS = tuple(range(1, ORDER + 1))
     OUTPUT_FAMILY = FIT_ID
-    MODEL_TAG = f'order_{ORDER}_joint_a0_continuum_nopriors'
+    MODEL_TAG = f'order_{ORDER}_rescaled_a0_standard_continuum_nopriors'
     FIT_WATERMARK = (
-        rf'fit12, order {ORDER}, $a_0=zA_0$, fixed $c_0=1$, no priors'
+        rf'fit12, order {ORDER}, $a_0=zA_0$, standard continuum, no priors'
     )
 
 OUTPUT_ROOT = args.output_base.expanduser().resolve() / OUTPUT_FAMILY / MODEL_TAG
@@ -280,12 +285,17 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     'fit11_order': args.fit11_order if FIT_ID == 'fit11' else None,
     'fit12_order': args.fit12_order if FIT_ID == 'fit12' else None,
     'finite_spacing_additive_beta_parameter': (
-        'beta_const' if FIT_ID in ('fit11', 'fit12') else None
+        'beta_const' if FIT_ID == 'fit11'
+        else 'A0 with fixed per-interpolation z' if FIT_ID == 'fit12'
+        else None
     ),
-    'fit12_continuum_constraints': (
+    'fit12_reparameterization': (
         {
-            'z': 'a^2/t', 'a0': 'z*A0',
-            'c0': '1 fixed for every z', 'coefficient_artifacts': 'none',
+            'z': 'a^2/t',
+            'fitted_combination': 'a0=z*A0 at each fixed flow time',
+            'independence': 'A0 and c_n independent between interpolations',
+            'c0': '1 fixed',
+            'continuum': 'standard per-g2 linear extrapolation',
         }
         if FIT_ID == 'fit12' else None
     ),
@@ -301,7 +311,7 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     'reviewed_weak_coupling': args.reviewed_weak_coupling,
     'continuum_thinning': args.continuum_thinning,
     'flow_time_limits': [3.0, 8.0],
-    'thinning_flow_spacings': [0.01, 0.02, 0.05, 0.10, 0.20],
+    'thinning_flow_spacings': [0.05, 0.10, 0.20],
     'slurm_job_id': os.environ.get('SLURM_JOB_ID'),
     'slurm_array_task_id': os.environ.get('SLURM_ARRAY_TASK_ID'),
 }, indent=2) + '\n')
@@ -332,7 +342,7 @@ WINDOWS = tuple(
 CENTRAL_WINDOW = (4.0, 6.0)
 G2_GRID = (0.9, 4.9, 0.1)
 TARGET_G2 = (1.1, 1.3, 1.5, 1.8, 2.2, 2.6, 3.0, 4.0)
-THINNING_FLOW_SPACINGS = (0.01, 0.02, 0.05, 0.10, 0.20)
+THINNING_FLOW_SPACINGS = (0.05, 0.10, 0.20)
 THINNING_CONTINUUM_CASES = {
     'diagonal': {
         'cov_mode': 'diagonal', 'diagonal': True,
@@ -532,7 +542,7 @@ def interpolation_coefficient_specs():
         ]
     if FIT_ID == 'fit12':
         return [
-            (r'a_0^{(\beta)}', 'beta_const'),
+            (r'A_0^{(\beta)}', 'A0'),
         ] + [
             (rf'c_{{{power}}}', f'pt_c{power}') for power in PT_POWERS
         ]
@@ -544,6 +554,41 @@ def interpolation_coefficient_specs():
     if FIT_ID == 'fit7':
         return [(r'b_2', 'b2')] + higher_orders
     return higher_orders
+
+
+def _evaluate_stored_fit12_interpolation(x, parameters):
+    """Evaluate Fit 12 after the explicit (z, A0) coordinate change."""
+    return fit12_model.rescaled_interpolation_beta(
+        x, parameters, bf.perturbative_beta_function, ORDER
+    )
+
+
+def reparameterize_fit12_interpolations():
+    """Store A0 and z explicitly without changing any fitted curve.
+
+    The no-prior interpolation is solved in the identifiable coordinate
+    a0=z*A0.  Afterward, this exact affine coordinate change stores A0 and the
+    fixed z for each flow time.  All downstream evaluations then explicitly
+    multiply z*A0, guarding against accidentally omitting z in the continuum
+    stage while preserving the interpolation optimum exactly.
+    """
+    if FIT_ID != 'fit12':
+        return
+    for operator, fits_by_time in bf.ntrp_fits[FLOW].items():
+        for flow_time, parameters in list(fits_by_time.items()):
+            nominal_time = float(flow_time) - config.tau0
+            if nominal_time <= 0.0:
+                raise RuntimeError(
+                    f'Fit12 has non-positive shifted flow time: {flow_time}'
+                )
+            z = 1.0 / nominal_time
+            fits_by_time[flow_time] = (
+                fit12_model.rescale_interpolation_parameters(
+                    parameters, z, ORDER
+                )
+            )
+    bf.interpolation.model.fcn = _evaluate_stored_fit12_interpolation
+    bf.ntrp_fcn = bf.interpolation.model.evaluate
 
 
 config = betafn.AnalysisConfig(
@@ -572,10 +617,14 @@ if args.validate_only:
     plotted_parameter_names = sorted(
         parameter_name for _, parameter_name in interpolation_coefficient_specs()
     )
-    if parameter_names != plotted_parameter_names:
+    expected_plotted_parameter_names = (
+        sorted(['A0', *[f'pt_c{power}' for power in PT_POWERS]])
+        if FIT_ID == 'fit12' else parameter_names
+    )
+    if expected_plotted_parameter_names != plotted_parameter_names:
         raise RuntimeError(
             'Interpolation/plot parameter mismatch: '
-            f'{parameter_names} versus {plotted_parameter_names}'
+            f'{expected_plotted_parameter_names} versus {plotted_parameter_names}'
         )
     if FIT_ID in (
         'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11', 'fit12'
@@ -653,25 +702,16 @@ if args.validate_only:
             interpolation.fcn(test_x, test_parameters), expected_beta,
             rtol=1e-13, atol=1e-13,
         )
-
-        joint_names = fit12_model.joint_parameter_names(ORDER)
-        joint_parameters = {
-            name: [0.05 * (index + 1)]
-            for index, name in enumerate(joint_names)
-        }
-        continuum = fit12_model.continuum_beta(
-            test_x, joint_parameters, bf.perturbative_beta_function, ORDER
-        )
-        expected_continuum = bf.perturbative_beta_function(
-            test_x, loops=3
-        ) * (
-            1.0 + sum(
-                joint_parameters[f'c{power}'][0] * test_u**power
-                for power in PT_POWERS
-            )
+        test_z = 0.2
+        rescaled_parameters = fit12_model.rescale_interpolation_parameters(
+            test_parameters, test_z, ORDER
         )
         np.testing.assert_allclose(
-            np.asarray(continuum, dtype=float), expected_continuum,
+            fit12_model.rescaled_interpolation_beta(
+                test_x, rescaled_parameters,
+                bf.perturbative_beta_function, ORDER,
+            ),
+            expected_beta,
             rtol=1e-13, atol=1e-13,
         )
     expected_fixed_coefficients = {
@@ -730,7 +770,7 @@ if args.validate_only:
             raise RuntimeError('No-prior interpolation smoke fit produced non-finite values.')
     if WINDOWS[0] != (3.0, 4.0) or WINDOWS[-1] != (7.0, 8.0):
         raise RuntimeError(f'Flow-time catalogue does not span 3 through 8: {WINDOWS}')
-    if THINNING_FLOW_SPACINGS != (0.01, 0.02, 0.05, 0.10, 0.20):
+    if THINNING_FLOW_SPACINGS != (0.05, 0.10, 0.20):
         raise RuntimeError('Unexpected thinning-spacing catalogue.')
     print(f'validation successful: model={FIT_ID}, tag={MODEL_TAG}, parameters={parameter_names}')
     raise SystemExit(0)
@@ -784,6 +824,7 @@ plt.close(fig)
 bf.run_chiral(config)
 bf.run_infinite_volume(config)
 bf.run_interpolation(config)
+reparameterize_fit12_interpolations()
 print(bf.stage_summary('chiral'))
 print(bf.stage_summary('infinite_volume'))
 print(bf.stage_summary('interpolation'))
@@ -827,7 +868,9 @@ def save_interpolation_diagnostics():
                 chi2 = float(qof['chi2'])
                 dof = int(qof['dof'])
                 parameter_summary = '; '.join(
-                    f'{name}={params[name][0]}' for name in sorted(params) if name != 'x'
+                    f'{name}={params[name][0]}'
+                    for name in sorted(params)
+                    if name != 'x' and not name.startswith('_')
                 )
                 for index, coupling in enumerate(fit_couplings):
                     detail_rows.append({
@@ -1251,8 +1294,13 @@ plt.close(fig)
 # In[ ]:
 
 
-def run_fit12_continuum(window, mode):
-    """Run the joint, continuum-constrained Fit 12 linear GLS analysis."""
+def _experimental_fit12_joint_continuum(window, mode):
+    """Retained experimental global fit; not used by production Fit 12.
+
+    Sharing one A0 and all c_n over every coupling and flow time is a stronger
+    model than the Fit 12 reparameterization.  The production dispatcher below
+    intentionally uses ``bf.cnt_xtrp`` instead.
+    """
     if mode not in ('diagonal', 'correlated'):
         raise ValueError(f'Unsupported continuum mode: {mode}')
 
@@ -1426,9 +1474,6 @@ def run_fit12_continuum(window, mode):
 
 def run_continuum_case(window, mode):
     """Run one continuum case using the active fit's continuum model."""
-    if FIT_ID == 'fit12':
-        run_fit12_continuum(window, mode)
-        return
     options = THINNING_CONTINUUM_CASES[mode]
     bf.cnt_xtrp(
         mnt=window[0], mxt=window[1],
