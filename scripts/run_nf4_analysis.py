@@ -311,7 +311,7 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     'reviewed_weak_coupling': args.reviewed_weak_coupling,
     'continuum_thinning': args.continuum_thinning,
     'flow_time_limits': [3.0, 8.0],
-    'thinning_flow_spacings': [0.05, 0.10, 0.20],
+    'thinning_flow_spacings': [0.10, 0.20, 0.30],
     'slurm_job_id': os.environ.get('SLURM_JOB_ID'),
     'slurm_array_task_id': os.environ.get('SLURM_ARRAY_TASK_ID'),
 }, indent=2) + '\n')
@@ -342,7 +342,7 @@ WINDOWS = tuple(
 CENTRAL_WINDOW = (4.0, 6.0)
 G2_GRID = (0.9, 4.9, 0.1)
 TARGET_G2 = (1.1, 1.3, 1.5, 1.8, 2.2, 2.6, 3.0, 4.0)
-THINNING_FLOW_SPACINGS = (0.05, 0.10, 0.20)
+THINNING_FLOW_SPACINGS = (0.10, 0.20, 0.30)
 THINNING_CONTINUUM_CASES = {
     'diagonal': {
         'cov_mode': 'diagonal', 'diagonal': True,
@@ -770,7 +770,7 @@ if args.validate_only:
             raise RuntimeError('No-prior interpolation smoke fit produced non-finite values.')
     if WINDOWS[0] != (3.0, 4.0) or WINDOWS[-1] != (7.0, 8.0):
         raise RuntimeError(f'Flow-time catalogue does not span 3 through 8: {WINDOWS}')
-    if THINNING_FLOW_SPACINGS != (0.05, 0.10, 0.20):
+    if THINNING_FLOW_SPACINGS != (0.10, 0.20, 0.30):
         raise RuntimeError('Unexpected thinning-spacing catalogue.')
     print(f'validation successful: model={FIT_ID}, tag={MODEL_TAG}, parameters={parameter_names}')
     raise SystemExit(0)
@@ -1786,7 +1786,7 @@ for window in WINDOWS:
 
 
 def continuum_panel_times(case, window, operator, g2, tau0):
-      """Return exact fit times and one valid hollow point on either side."""
+      """Return exact fit times and regularly spaced neighboring points."""
       all_times = sorted(
           bf.ntrp_fits[FLOW][operator],
           key=float,
@@ -1826,24 +1826,76 @@ def continuum_panel_times(case, window, operator, g2, tau0):
           ]
       fit_times = sorted(fit_times, key=float)
 
-      # Display at most one unused point on each side, nearest to one flow-time
-      # unit beyond the fit window. Do not draw the whole neighboring interval.
+      # For thinning studies, use the exact active spacing.  For the standard
+      # analysis, infer the native spacing from the available flow times.
+      spacing = case.get('spacing')
+      if spacing is None:
+          nominal_valid = np.asarray(
+              sorted(float(time) - tau0 for time in valid_times),
+              dtype=float,
+          )
+          differences = np.diff(nominal_valid)
+          differences = differences[differences > 1e-10]
+          spacing = float(np.min(differences)) if len(differences) else None
+      else:
+          spacing = float(spacing)
+
       outside_times = []
-      neighbor_specs = (
-          (window[0] - 1.0, lambda nominal: nominal < window[0]),
-          (window[1] + 1.0, lambda nominal: nominal > window[1]),
-      )
-      for target, is_on_side in neighbor_specs:
-          candidates = [
-              time
-              for time in valid_times
-              if is_on_side(float(time) - tau0)
-          ]
-          if candidates:
-              outside_times.append(min(
-                  candidates,
-                  key=lambda time: abs((float(time) - tau0) - target),
-              ))
+      if spacing is not None and spacing > 0.0:
+          # Show every valid point from one flow-time unit below the fit window
+          # through one unit above it, using the same spacing as the fit.  The
+          # window endpoints themselves remain filled because they are fitted.
+          left_targets = np.arange(
+              window[0] - spacing,
+              window[0] - 1.0 - 0.5 * spacing,
+              -spacing,
+          )
+          right_targets = np.arange(
+              window[1] + spacing,
+              window[1] + 1.0 + 0.5 * spacing,
+              spacing,
+          )
+          # Preserve the original points exactly one unit outside the window
+          # when a spacing (notably 0.3) does not divide that unit interval.
+          left_outer = window[0] - 1.0
+          right_outer = window[1] + 1.0
+          if not np.any(np.isclose(
+              left_targets, left_outer, rtol=0.0, atol=1e-10
+          )):
+              left_targets = np.append(left_targets, left_outer)
+          if not np.any(np.isclose(
+              right_targets, right_outer, rtol=0.0, atol=1e-10
+          )):
+              right_targets = np.append(right_targets, right_outer)
+          neighbor_specs = (
+              (
+                  left_targets,
+                  lambda nominal: window[0] - 1.0 - 1e-10
+                  <= nominal < window[0] - 1e-10,
+              ),
+              (
+                  right_targets,
+                  lambda nominal: window[1] + 1e-10
+                  < nominal <= window[1] + 1.0 + 1e-10,
+              ),
+          )
+          for targets, is_in_interval in neighbor_specs:
+              candidates = [
+                  time
+                  for time in valid_times
+                  if is_in_interval(float(time) - tau0)
+              ]
+              for target in targets:
+                  if not candidates:
+                      break
+                  nearest = min(
+                      candidates,
+                      key=lambda time: abs((float(time) - tau0) - target),
+                  )
+                  if nearest not in outside_times:
+                      outside_times.append(nearest)
+
+      outside_times = sorted(outside_times, key=float)
 
       return fit_times, outside_times
 
@@ -1935,7 +1987,8 @@ def plot_continuum_panels(window, mode, divide_by_g4):
                       zorder=4,
                   )
 
-              # Hollow points: nearest valid points at tmin-1 and tmax+1.
+              # Hollow points: all valid neighboring points, sampled with the
+              # same flow-time spacing as the points used in the fit.
               if outside_times:
                   xoutside, youtside = continuum_plot_values(outside_times)
 
@@ -2039,7 +2092,7 @@ def plot_continuum_panels(window, mode, divide_by_g4):
               + correction_label
               + '\n'
               + 'Filled points: included in fit; '
-              + 'hollow points: nearest valid times at one unit outside fit window'
+              + 'hollow points: neighboring one-unit intervals at the fit spacing'
           ),
           fontsize=11,
           color='gray',
