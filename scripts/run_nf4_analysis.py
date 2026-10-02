@@ -5,7 +5,7 @@
 # 
 # Updated upstream analysis (`2af131f`), Wilson flow, on-the-fly TLN,
 # three-volume infinite-volume limit, and exhaustive integer flow-time-window
-# scan for Fits 4--12.  The selected model is recorded in
+# scan for Fits 1--12.  The selected model is recorded in
 # `run_configuration.json`.  Fit12 is the finite-flow-time reparameterization
 # a0=z*A0, with z=a^2/t and c0=1.  Because z is constant within each
 # interpolation and A0 is independently free there, the identifiable fitted
@@ -59,14 +59,19 @@ plt.rcParams.update({
 # In[2]:
 
 
-parser = argparse.ArgumentParser(description='Run the complete NF4 fit4--fit12 analysis without Jupyter.')
+parser = argparse.ArgumentParser(description='Run the complete NF4 fit1--fit12 analysis without Jupyter.')
 parser.add_argument(
     '--model', choices=(
-        'fit4', 'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11',
-        'fit12',
+        'fit1', 'fit2', 'fit3', 'fit4', 'fit5', 'fit6', 'fit7', 'fit8',
+        'fit9', 'fit10', 'fit11', 'fit12',
     ),
     default='fit4',
 )
+for model in ('fit1', 'fit2', 'fit3'):
+    parser.add_argument(
+        f'--{model}-order', type=int, choices=(3, 4, 5), default=5,
+        help=f'Highest fitted polynomial coefficient p_N for {model}.',
+    )
 parser.add_argument('--fit4-order', type=int, default=4, help='Correction order for fit4 only.')
 parser.add_argument('--fit4-width', type=float, default=10.0,
                     help='Zero-centered prior width for fit4 correction coefficients.')
@@ -136,6 +141,7 @@ FIT_ID = args.model
 CORRECTION = args.correction
 DATA_DIR = args.data_dir.expanduser().resolve()
 FIXED_CORRECTION_COEFFICIENTS = {}
+POLYNOMIAL_PARAMETER_INDICES = ()
 plt.rcParams['text.usetex'] = args.latex
 if args.latex:
     plt.rcParams.update({
@@ -144,7 +150,31 @@ if args.latex:
         'text.latex.preamble': r'\usepackage{amsmath}',
     })
 
-if FIT_ID == 'fit4':
+if FIT_ID in ('fit1', 'fit2', 'fit3'):
+    ORDER = getattr(args, f'{FIT_ID}_order')
+    FIT_WIDTH = None
+    FIT_NO_PRIORS = True
+    FIT_PRIOR_COUNT = 0
+    FIT_FOOTER = 'no coefficient priors, xerrors=False'
+    PT_POWERS = ()
+    OUTPUT_FAMILY = FIT_ID
+    MODEL_TAG = f'order_{ORDER}_nopriors'
+    if FIT_ID == 'fit1':
+        POLYNOMIAL_PARAMETER_INDICES = tuple(range(ORDER + 1))
+        FIT_WATERMARK = rf'fit1, polynomial through $p_{{{ORDER}}}$, no priors'
+    elif FIT_ID == 'fit2':
+        POLYNOMIAL_PARAMETER_INDICES = tuple(range(ORDER + 1))
+        FIT_WATERMARK = (
+            rf'fit2, free $p_0$ + $x^2$ series through $p_{{{ORDER}}}$, '
+            'no priors'
+        )
+    else:
+        POLYNOMIAL_PARAMETER_INDICES = tuple(range(1, ORDER + 1))
+        FIT_WATERMARK = (
+            rf'fit3, $p_0=0$ + $x^2$ series through $p_{{{ORDER}}}$, '
+            'no priors'
+        )
+elif FIT_ID == 'fit4':
     ORDER = args.fit4_order
     PT_POWERS = tuple(range(1, ORDER + 1))
     MODEL_TAG = f'order_{ORDER}'
@@ -272,6 +302,9 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 (OUTPUT_ROOT / 'run_configuration.json').write_text(json.dumps({
     'model': FIT_ID,
     'model_tag': MODEL_TAG,
+    'fit1_order': args.fit1_order if FIT_ID == 'fit1' else None,
+    'fit2_order': args.fit2_order if FIT_ID == 'fit2' else None,
+    'fit3_order': args.fit3_order if FIT_ID == 'fit3' else None,
     'fit4_order': ORDER if FIT_ID == 'fit4' else None,
     'fit4_width': FIT_WIDTH,
     'fit4_no_priors': FIT_NO_PRIORS if FIT_ID == 'fit4' else None,
@@ -301,6 +334,7 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     ),
     'interpolation_xerrors': not FIT_NO_PRIORS,
     'pt_powers': PT_POWERS,
+    'polynomial_parameter_indices': POLYNOMIAL_PARAMETER_INDICES,
     'fixed_correction_coefficients': FIXED_CORRECTION_COEFFICIENTS,
     'data_dir': str(DATA_DIR),
     'output_root': str(OUTPUT_ROOT),
@@ -417,7 +451,51 @@ def selected_multiplicative_correction(u, parameters, prefix):
     )
 
 
-if FIT_ID == 'fit4':
+if FIT_ID == 'fit1':
+    def plain_polynomial_interpolation(x, p):
+        x = np.asarray(x)
+        return sum(
+            p[f'p{power}'][0] * x**power
+            for power in POLYNOMIAL_PARAMETER_INDICES
+        )
+
+    interpolation = betafn.InterpolationSpec(
+        fcn=plain_polynomial_interpolation,
+        prior=None,
+        p0={f'p{power}': [0.0] for power in POLYNOMIAL_PARAMETER_INDICES},
+        xerrors=False,
+    )
+elif FIT_ID == 'fit2':
+    def free_constant_running_interpolation(x, p):
+        x = np.asarray(x)
+        running = sum(
+            p[f'p{power}'][0] * x**(power - 1)
+            for power in range(1, ORDER + 1)
+        )
+        return p['p0'][0] + x**2 * running
+
+    interpolation = betafn.InterpolationSpec(
+        fcn=free_constant_running_interpolation,
+        prior=None,
+        p0={f'p{power}': [0.0] for power in POLYNOMIAL_PARAMETER_INDICES},
+        xerrors=False,
+    )
+elif FIT_ID == 'fit3':
+    def origin_constrained_running_interpolation(x, p):
+        x = np.asarray(x)
+        running = sum(
+            p[f'p{power}'][0] * x**(power - 1)
+            for power in POLYNOMIAL_PARAMETER_INDICES
+        )
+        return x**2 * running
+
+    interpolation = betafn.InterpolationSpec(
+        fcn=origin_constrained_running_interpolation,
+        prior=None,
+        p0={f'p{power}': [0.0] for power in POLYNOMIAL_PARAMETER_INDICES},
+        xerrors=False,
+    )
+elif FIT_ID == 'fit4':
     if FIT_NO_PRIORS:
         def prior_free_interpolation(x, p):
             u = np.asarray(x) / bf.perturbative_beta_function.nrm
@@ -536,6 +614,11 @@ else:
 
 def interpolation_coefficient_specs():
     """Return plot labels and parameter keys for the active interpolation."""
+    if FIT_ID in ('fit1', 'fit2', 'fit3'):
+        return [
+            (rf'p_{{{power}}}', f'p{power}')
+            for power in POLYNOMIAL_PARAMETER_INDICES
+        ]
     if FIT_ID == 'fit11':
         return [(r'a_0^{(\beta)}', 'beta_const')] + [
             (rf'c_{{{power}}}', f'pt_c{power}') for power in PT_POWERS
@@ -627,7 +710,8 @@ if args.validate_only:
             f'{expected_plotted_parameter_names} versus {plotted_parameter_names}'
         )
     if FIT_ID in (
-        'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11', 'fit12'
+        'fit1', 'fit2', 'fit3', 'fit5', 'fit6', 'fit7', 'fit8', 'fit9',
+        'fit10', 'fit11', 'fit12'
     ):
         if interpolation.prior is not None or interpolation.xerrors:
             raise RuntimeError(
@@ -640,7 +724,34 @@ if args.validate_only:
         name: [0.25 * (index + 1)]
         for index, name in enumerate(parameter_names)
     }
-    if FIT_ID == 'fit5':
+    if FIT_ID == 'fit1':
+        expected_beta = sum(
+            test_parameters[f'p{power}'][0] * test_x**power
+            for power in POLYNOMIAL_PARAMETER_INDICES
+        )
+        np.testing.assert_allclose(
+            interpolation.fcn(test_x, test_parameters), expected_beta,
+            rtol=1e-13, atol=1e-13,
+        )
+    elif FIT_ID == 'fit2':
+        expected_beta = test_parameters['p0'][0] + test_x**2 * sum(
+            test_parameters[f'p{power}'][0] * test_x**(power - 1)
+            for power in range(1, ORDER + 1)
+        )
+        np.testing.assert_allclose(
+            interpolation.fcn(test_x, test_parameters), expected_beta,
+            rtol=1e-13, atol=1e-13,
+        )
+    elif FIT_ID == 'fit3':
+        expected_beta = test_x**2 * sum(
+            test_parameters[f'p{power}'][0] * test_x**(power - 1)
+            for power in POLYNOMIAL_PARAMETER_INDICES
+        )
+        np.testing.assert_allclose(
+            interpolation.fcn(test_x, test_parameters), expected_beta,
+            rtol=1e-13, atol=1e-13,
+        )
+    elif FIT_ID == 'fit5':
         expected_beta = bf.perturbative_beta_function(test_x, loops=3) + test_x**2 * sum(
             test_parameters[f'd{power}'][0] * test_u**power for power in PT_POWERS
         )
@@ -936,11 +1047,7 @@ def save_interpolation_diagnostics():
         )
 
 
-if FIT_ID in (
-    'fit4', 'fit5', 'fit6', 'fit7', 'fit8', 'fit9', 'fit10', 'fit11',
-    'fit12',
-):
-    save_interpolation_diagnostics()
+save_interpolation_diagnostics()
 
 
 # ## Plot 2 — infinite-volume extrapolations for every bare coupling
@@ -3169,9 +3276,24 @@ if args.continuum_thinning:
 
 
 def ratio_model(x, p):
-  u = np.asarray(x) / bf.perturbative_beta_function.nrm
+  x = np.asarray(x)
+  u = x / bf.perturbative_beta_function.nrm
+  if FIT_ID == 'fit1':
+      return sum(
+          p[f'p{power}'][0] * x**(power - 2)
+          for power in POLYNOMIAL_PARAMETER_INDICES
+      )
+  if FIT_ID == 'fit2':
+      return p['p0'][0] / x**2 + sum(
+          p[f'p{power}'][0] * x**(power - 1)
+          for power in range(1, ORDER + 1)
+      )
+  if FIT_ID == 'fit3':
+      return sum(
+          p[f'p{power}'][0] * x**(power - 1)
+          for power in POLYNOMIAL_PARAMETER_INDICES
+      )
   if FIT_ID == 'fit11':
-      x = np.asarray(x)
       correction = 1.0 + sum(
           p[f'c{power}'][0] * u**power
           for power in PT_POWERS
@@ -3242,10 +3364,16 @@ for window in WINDOWS:
       continuum_mean = gv.mean(y)
       continuum_sdev = gv.sdev(y)
 
-      prefix = 'c' if FIT_ID in (
-          'fit4', 'fit8', 'fit9', 'fit10', 'fit11', 'fit12'
-      ) else 'd'
-      parameters = {f'{prefix}{power}': [0.0] for power in PT_POWERS}
+      if FIT_ID in ('fit1', 'fit2', 'fit3'):
+          parameters = {
+              f'p{power}': [0.0]
+              for power in POLYNOMIAL_PARAMETER_INDICES
+          }
+      else:
+          prefix = 'c' if FIT_ID in (
+              'fit4', 'fit8', 'fit9', 'fit10', 'fit11', 'fit12'
+          ) else 'd'
+          parameters = {f'{prefix}{power}': [0.0] for power in PT_POWERS}
       if FIT_ID == 'fit6':
           parameters['b1'] = [0.0]
       elif FIT_ID == 'fit7':
@@ -3265,11 +3393,11 @@ for window in WINDOWS:
       fit = lsqfit.nonlinear_fit(**fit_kwargs)
       fits[operator] = fit
 
-      # Evaluate the fitted curve and its posterior uncertainty. Fit11
-      # contains beta_const/x^2 in this ratio and is undefined at x=0, so
-      # display it only over the positive continuum-data support. All other
-      # models retain their analytic weak-coupling continuation from x=0.
-      xp_min = float(x[0]) if FIT_ID == 'fit11' else 0.0
+      # Evaluate the fitted curve and its posterior uncertainty. Fits with
+      # beta terms below x^2 are singular after division by x^2, so display
+      # them only over the positive continuum-data support.
+      ratio_undefined_at_zero = FIT_ID in ('fit1', 'fit2', 'fit11')
+      xp_min = float(x[0]) if ratio_undefined_at_zero else 0.0
       xp = np.linspace(xp_min, float(x[-1]), 600)
       yp = np.asarray(
           ratio_model(xp, fit.p),
@@ -3328,8 +3456,8 @@ for window in WINDOWS:
           zorder=3,
       )
 
-      if FIT_ID == 'fit11':
-          origin = 'undefined (additive beta constant / g^4)'
+      if ratio_undefined_at_zero:
+          origin = 'undefined (polynomial terms below x^2 / g^4)'
       else:
           origin = np.asarray(
               ratio_model(np.asarray([0.0]), fit.p),
@@ -3411,9 +3539,17 @@ for window in WINDOWS:
           + r'Bands show posterior $\pm1\sigma$'
           + '\n'
           + (
-              r'Additive constant: $\beta/g^4$ undefined at $g^2=0$'
-              if FIT_ID == 'fit11'
-              else r'Fixed $c_0=1$ perturbative limit'
+              r'$p_0/x^2+p_1/x$: $\beta/g^4$ undefined at $x=0$'
+              if FIT_ID == 'fit1'
+              else (
+                  r'Additive constant: $\beta/g^4$ undefined at $x=0$'
+                  if FIT_ID in ('fit2', 'fit11')
+                  else (
+                      r'Origin-constrained polynomial limit'
+                      if FIT_ID == 'fit3'
+                      else r'Fixed $c_0=1$ perturbative limit'
+                  )
+              )
           )
       ),
       transform=ax.transAxes,
@@ -3469,7 +3605,7 @@ if args.reviewed_weak_coupling:
         pt_over_g4=pt_over_g4,
         load_case=load_case,
         save_figure=save_figure,
-        include_extended_to_zero=FIT_ID not in ('fit11', 'fit12'),
+        include_extended_to_zero=FIT_ID not in ('fit1', 'fit2', 'fit11', 'fit12'),
     )
     lambda_parameter_results = run_lambda_parameter_plots(
         bf=bf,

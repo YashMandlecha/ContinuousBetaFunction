@@ -1,6 +1,6 @@
 # NF4 HPCC jobs
 
-The runner reproduces the fit4 through fit12 notebook analysis and figures,
+The runner reproduces the fit1 through fit12 analysis and figures,
 except for the intentionally omitted flow-time correlation-matrix figures.
 It uses Matplotlib's non-interactive `Agg` backend and writes every result under
 the selected output base.
@@ -33,14 +33,23 @@ is passed explicitly to the Python runner.
 Outputs are isolated as follows:
 
 ```text
+<output-base>/fit1/order_<N>_nopriors/...
+<output-base>/fit2/order_<N>_nopriors/...
+<output-base>/fit3/order_<N>_nopriors/...
 <output-base>/fit4/order_<N>/...
 <output-base>/fit5/pt_preserving_u3/...
 <output-base>/fit6/pt_preserving_u3_u4/...
 <output-base>/fit12/order_4_joint_a0_continuum_nopriors/...
 ```
 
+For `N=3,4,5`, the first three model families are
+`fit1: beta(x)=sum_{n=0}^N p_n x^n`,
+`fit2: beta(x)=p_0+x^2 sum_{n=1}^N p_n x^(n-1)`, and
+`fit3: beta(x)=x^2 sum_{n=1}^N p_n x^(n-1)`.
+They use no coefficient priors and disable interpolation x-errors.
+
 Each completed job writes `run_configuration.json`, all PNG/PDF figures, the
-serialized diagonal/correlated continuum cases, the scan-summary CSV, the five
+serialized diagonal/correlated continuum cases, the scan-summary CSV, the three
 flow-time thinning studies under `continuum_thinning_scan/`, and a final
 `RUN_COMPLETE.json`. Absence of `RUN_COMPLETE.json` means the job did not finish
 successfully.
@@ -52,5 +61,5 @@ continuum, while the multiplicative intercept `c0=1` and the coefficients
 `c_n` are shared at every `z`. There are no additional `d_n` cutoff terms.
 
 Both shared Slurm templates request 48 hours of wall time per submitted order
-because every order runs 15 flow-time windows and the five-spacing thinning
+because every order runs 15 flow-time windows and the three-spacing thinning
 study by default.

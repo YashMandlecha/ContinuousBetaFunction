@@ -14,8 +14,12 @@ set -euo pipefail
 : "${BETAFN_OUTPUT_BASE:?Set BETAFN_OUTPUT_BASE to an HPCC output directory.}"
 : "${BETAFN_VENV:?Set BETAFN_VENV to the Python virtual-environment directory.}"
 
-if [[ ! "${NF4_MODEL}" =~ ^fit(5|6|7|8|9|10|11|12)$ ]]; then
-  echo "NF4_MODEL must be fit5 through fit12; got ${NF4_MODEL}" >&2
+if [[ ! "${NF4_MODEL}" =~ ^fit(1|2|3|5|6|7|8|9|10|11|12)$ ]]; then
+  echo "NF4_MODEL must be fit1--fit3 or fit5--fit12; got ${NF4_MODEL}" >&2
+  exit 2
+fi
+if [[ "${NF4_MODEL}" =~ ^fit(1|2|3)$ && "${NF4_ORDER}" != "3" && "${NF4_ORDER}" != "4" && "${NF4_ORDER}" != "5" ]]; then
+  echo "NF4_ORDER must be 3, 4, or 5 for ${NF4_MODEL}; got ${NF4_ORDER}" >&2
   exit 2
 fi
 if [[ "${NF4_MODEL}" =~ ^fit(5|6|7)$ && "${NF4_ORDER}" != "1" && "${NF4_ORDER}" != "2" ]]; then
