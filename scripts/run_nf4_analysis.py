@@ -948,19 +948,77 @@ if FIT_ID in (
 # In[7]:
 
 
+def infinite_volume_pvalue(coupling, quantity, operator, time):
+    """Return the stored infinite-volume fit p-value as a probability."""
+    quality = bf.infinite_volume.fetch(
+        'quality', (coupling, quantity, FLOW, operator, time)
+    )
+    return float(quality['p-value'])
+
+
+def format_pvalue_percent(pvalue):
+    """Format a p-value as a compact percentage without hiding small values."""
+    percent = 100.0 * float(pvalue)
+    if not np.isfinite(percent):
+        return 'n/a'
+    if percent == 0.0:
+        return '0%'
+    if percent < 0.01:
+        return f'{percent:.1e}%'
+    if percent < 1.0:
+        return f'{percent:.2f}%'
+    return f'{percent:.1f}%'
+
+
+def annotate_infinite_volume_pvalues(ax, values):
+    """Add a compact operator-by-operator p-value box to an IV panel."""
+    short_labels = {'p': 'W', 'c': 'C', 's': 'S'}
+    percentages = '  '.join(
+        f'{short_labels[operator]} '
+        f'{format_pvalue_percent(values[operator])}'
+        for operator in OBSERVABLES
+    )
+    lines = [rf'$p$: {percentages}']
+
+    ax.text(
+        0.98,
+        0.96,
+        '\n'.join(lines),
+        transform=ax.transAxes,
+        ha='right',
+        va='top',
+        fontsize=7.2,
+        linespacing=1.12,
+        color='0.18',
+        bbox={
+            'boxstyle': 'round,pad=0.32',
+            'facecolor': 'white',
+            'edgecolor': '0.72',
+            'linewidth': 0.7,
+            'alpha': 0.88,
+        },
+        zorder=20,
+    )
+
+
 fig, axes = plt.subplots(2, 5, figsize=(22, 9))
 for ax, coupling in zip(axes.ravel(), COUPLINGS):
     times = sorted(bf.iv_fits[coupling]['g2'][FLOW][OBSERVABLES[0]], key=float)
     time = min(times, key=lambda t: abs(float(t) - CENTRAL_WINDOW[0]))
+    pvalues = {}
     for operator in OBSERVABLES:
         xfit, yfit, data = bf.infinite_volume_curve(coupling, FLOW, operator, time, x='g2')
         intercept = bf.infinite_volume.model.evaluate(0.0, bf.iv_fits[coupling]['g2'][FLOW][operator][time])
+        pvalues[operator] = infinite_volume_pvalue(
+            coupling, 'g2', operator, time
+        )
         color = OP_COLORS[operator]
         ax.errorbar(gv.mean(data.x), gv.mean(data.y), xerr=gv.sdev(data.x), yerr=gv.sdev(data.y),
                     fmt='o', capsize=3, color=color, label=OP_LABELS[operator])
         ax.plot(xfit, gv.mean(yfit), color=color)
         ax.fill_between(xfit, gv.mean(yfit)-gv.sdev(yfit), gv.mean(yfit)+gv.sdev(yfit), color=color, alpha=.15)
         ax.errorbar([0], [gv.mean(intercept)], yerr=[gv.sdev(intercept)], fmt='s', capsize=3, color=color)
+    annotate_infinite_volume_pvalues(ax, pvalues)
     ax.set(title=rf'$\beta_b={beta_value(coupling):g}$, $t/a^2={time}$', xlabel=r'$1/V$', ylabel=r'$g^2_{GF}$')
 handles, labels = axes.ravel()[0].get_legend_handles_labels()
 fig.legend(handles, labels, ncol=3, loc='upper center', frameon=False)
@@ -990,6 +1048,7 @@ for ax, coupling in zip(axes.ravel(), COUPLINGS):
       available_times,
       key=lambda value: abs(float(value) - CENTRAL_WINDOW[0]),
   )
+  pvalues = {}
 
   for operator in OBSERVABLES:
       x_fit, beta_fit, beta_data = bf.infinite_volume_curve(
@@ -1003,6 +1062,9 @@ for ax, coupling in zip(axes.ravel(), COUPLINGS):
       x_fit = np.asarray(x_fit, dtype=float)
       beta_fit = np.asarray(beta_fit, dtype=object)
       beta_data_y = np.asarray(beta_data.y, dtype=object)
+      pvalues[operator] = infinite_volume_pvalue(
+          coupling, 'beta', operator, time
+      )
 
       color = OP_COLORS[operator]
 
@@ -1059,6 +1121,7 @@ for ax, coupling in zip(axes.ravel(), COUPLINGS):
           zorder=4,
       )
 
+  annotate_infinite_volume_pvalues(ax, pvalues)
   ax.set_title(
       rf'$\beta_b={beta_value(coupling):g}$, '
       rf'$t/a^2={float(time):g}$'
@@ -1121,6 +1184,7 @@ for ax, coupling in zip(axes.ravel(), COUPLINGS):
       available_times,
       key=lambda value: abs(float(value) - CENTRAL_WINDOW[0]),
   )
+  pvalues = {}
 
   for operator in OBSERVABLES:
       # Retrieve the beta_GF and g_GF^2 data used in the IV fits.
@@ -1153,8 +1217,20 @@ for ax, coupling in zip(axes.ravel(), COUPLINGS):
       # Since g2_values = g_GF^2, g_GF^4 = g2_values**2.
       ratio_data = beta_values / g2_values**2
 
-      beta_params = bf.iv_fits[coupling]['beta'][FLOW][operator][time]
-      g2_params = bf.iv_fits[coupling]['g2'][FLOW][operator][time]
+      # Fit the ratio itself so this plot has one well-defined goodness-of-fit
+      # value per operator.  This uses the same linear 1/V ansatz as the stored
+      # g^2 and beta infinite-volume fits, with the ratio covariance propagated
+      # through the correlated gvars above.
+      ratio_result = lsqfit.nonlinear_fit(
+          data=(inv_volume, ratio_data),
+          fcn=bf.infinite_volume.model.evaluate,
+          p0={
+              'k1(t;beta)': [float(gv.mean(ratio_data[0]))],
+              'k2(t;beta)': [0.0],
+          },
+      )
+      ratio_params = ratio_result.p
+      pvalues[operator] = float(ratio_result.Q)
 
       x_fit = np.linspace(
           float(np.min(inv_volume)),
@@ -1162,22 +1238,10 @@ for ax, coupling in zip(axes.ravel(), COUPLINGS):
           300,
       )
 
-      beta_fit = np.asarray(
-          [
-              bf.infinite_volume.model.evaluate(x, beta_params)
-              for x in x_fit
-          ],
+      ratio_fit = np.asarray(
+          bf.infinite_volume.model.evaluate(x_fit, ratio_params),
           dtype=object,
       )
-      g2_fit = np.asarray(
-          [
-              bf.infinite_volume.model.evaluate(x, g2_params)
-              for x in x_fit
-          ],
-          dtype=object,
-      )
-
-      ratio_fit = beta_fit / g2_fit**2
       color = OP_COLORS[operator]
 
       # Finite-volume beta_GF/g_GF^4 data.
@@ -1194,7 +1258,7 @@ for ax, coupling in zip(axes.ravel(), COUPLINGS):
           zorder=3,
       )
 
-      # Ratio of the fitted beta_GF and g_GF^2 IV curves.
+      # Direct beta_GF/g_GF^4 infinite-volume fit.
       ax.plot(
           x_fit,
           gv.mean(ratio_fit),
@@ -1214,15 +1278,10 @@ for ax, coupling in zip(axes.ravel(), COUPLINGS):
       )
 
       # Infinite-volume ratio at 1/V = 0.
-      beta_infinite = bf.infinite_volume.model.evaluate(
+      ratio_infinite = bf.infinite_volume.model.evaluate(
           0.0,
-          beta_params,
+          ratio_params,
       )
-      g2_infinite = bf.infinite_volume.model.evaluate(
-          0.0,
-          g2_params,
-      )
-      ratio_infinite = beta_infinite / g2_infinite**2
 
       ax.errorbar(
           [0.0],
@@ -1237,6 +1296,7 @@ for ax, coupling in zip(axes.ravel(), COUPLINGS):
           zorder=4,
       )
 
+  annotate_infinite_volume_pvalues(ax, pvalues)
   ax.set_title(
       rf'$\beta_b={beta_value(coupling):g}$, '
       rf'$t/a^2={float(time):g}$'
