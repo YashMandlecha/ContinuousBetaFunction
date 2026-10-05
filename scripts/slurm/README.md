@@ -48,6 +48,10 @@ For `N=3,4,5`, the first three model families are
 `fit3: beta(x)=x^2 sum_{n=1}^N p_n x^(n-1)`.
 They use no coefficient priors and disable interpolation x-errors.
 
+Fit6 accepts one through three higher-order additive terms. Fits9 and 10
+accept multiplicative correction orders 3 through 5; Fit8 remains restricted
+to orders 3 and 4. Fit11 accepts orders 3 through 5.
+
 Each completed job writes `run_configuration.json`, all PNG/PDF figures, the
 serialized diagonal/correlated continuum cases, the scan-summary CSV, the three
 flow-time thinning studies under `continuum_thinning_scan/`, and a final

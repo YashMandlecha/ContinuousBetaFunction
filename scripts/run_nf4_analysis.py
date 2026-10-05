@@ -77,13 +77,17 @@ parser.add_argument('--fit4-width', type=float, default=10.0,
                     help='Zero-centered prior width for fit4 correction coefficients.')
 parser.add_argument('--fit5-order', type=int, choices=(1, 2), default=2,
                     help='Number of free higher-order terms in fit5.')
-parser.add_argument('--fit6-order', type=int, choices=(1, 2), default=2,
+parser.add_argument('--fit6-order', type=int, choices=(1, 2, 3), default=2,
                     help='Number of free higher-order terms in fit6.')
 parser.add_argument('--fit7-order', type=int, choices=(1, 2), default=2,
                     help='Number of free higher-order terms in fit7.')
-for model in ('fit8', 'fit9', 'fit10'):
+parser.add_argument(
+    '--fit8-order', type=int, choices=(3, 4), default=4,
+    help='Multiplicative correction order for fit8.',
+)
+for model in ('fit9', 'fit10'):
     parser.add_argument(
-        f'--{model}-order', type=int, choices=(3, 4), default=4,
+        f'--{model}-order', type=int, choices=(3, 4, 5), default=4,
         help=f'Multiplicative correction order for {model}.',
     )
 parser.add_argument(

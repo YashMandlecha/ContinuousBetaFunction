@@ -22,12 +22,20 @@ if [[ "${NF4_MODEL}" =~ ^fit(1|2|3)$ && "${NF4_ORDER}" != "3" && "${NF4_ORDER}" 
   echo "NF4_ORDER must be 3, 4, or 5 for ${NF4_MODEL}; got ${NF4_ORDER}" >&2
   exit 2
 fi
-if [[ "${NF4_MODEL}" =~ ^fit(5|6|7)$ && "${NF4_ORDER}" != "1" && "${NF4_ORDER}" != "2" ]]; then
+if [[ "${NF4_MODEL}" =~ ^fit(5|7)$ && "${NF4_ORDER}" != "1" && "${NF4_ORDER}" != "2" ]]; then
   echo "NF4_ORDER must be 1 or 2 for ${NF4_MODEL}; got ${NF4_ORDER}" >&2
   exit 2
 fi
-if [[ "${NF4_MODEL}" =~ ^fit(8|9|10)$ && "${NF4_ORDER}" != "3" && "${NF4_ORDER}" != "4" ]]; then
+if [[ "${NF4_MODEL}" == "fit6" && "${NF4_ORDER}" != "1" && "${NF4_ORDER}" != "2" && "${NF4_ORDER}" != "3" ]]; then
+  echo "NF4_ORDER must be 1, 2, or 3 for ${NF4_MODEL}; got ${NF4_ORDER}" >&2
+  exit 2
+fi
+if [[ "${NF4_MODEL}" == "fit8" && "${NF4_ORDER}" != "3" && "${NF4_ORDER}" != "4" ]]; then
   echo "NF4_ORDER must be 3 or 4 for ${NF4_MODEL}; got ${NF4_ORDER}" >&2
+  exit 2
+fi
+if [[ "${NF4_MODEL}" =~ ^fit(9|10)$ && "${NF4_ORDER}" != "3" && "${NF4_ORDER}" != "4" && "${NF4_ORDER}" != "5" ]]; then
+  echo "NF4_ORDER must be 3, 4, or 5 for ${NF4_MODEL}; got ${NF4_ORDER}" >&2
   exit 2
 fi
 if [[ "${NF4_MODEL}" =~ ^fit(11|12)$ && "${NF4_ORDER}" != "3" && "${NF4_ORDER}" != "4" && "${NF4_ORDER}" != "5" ]]; then
@@ -47,6 +55,10 @@ export NUMBA_THREADING_LAYER=workqueue
 export NUMBA_CACHE_DIR="${SLURM_TMPDIR:-/tmp}/betafn-numba-${SLURM_JOB_ID}"
 mkdir -p "${NUMBA_CACHE_DIR}"
 
+# Fail before the expensive analysis if the repo-external Lambda blinding
+# secret is absent or invalid.  The factor itself is never printed.
+python -c 'import sys; sys.path.insert(0, "src"); from betafn.blinding import load_lambda_blinding_factor; load_lambda_blinding_factor()'
+
 model_order_option="--${NF4_MODEL}-order"
 srun python -u scripts/run_nf4_analysis.py \
   --model "${NF4_MODEL}" "${model_order_option}" "${NF4_ORDER}" \
@@ -54,4 +66,5 @@ srun python -u scripts/run_nf4_analysis.py \
   --output-base "${BETAFN_OUTPUT_BASE}" \
   --binsize 15 \
   --use-gamma-method \
-  --reviewed-weak-coupling
+  --reviewed-weak-coupling \
+  --continuum-thinning
