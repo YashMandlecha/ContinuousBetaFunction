@@ -27,6 +27,10 @@ export NUMBA_THREADING_LAYER=workqueue
 export NUMBA_CACHE_DIR="${SLURM_TMPDIR:-/tmp}/betafn-numba-${SLURM_JOB_ID}"
 mkdir -p "${NUMBA_CACHE_DIR}"
 
+# Fail before the expensive analysis if the repo-external Lambda blinding
+# secret is absent or invalid.  The factor itself is never printed.
+python -c 'import sys; sys.path.insert(0, "src"); from betafn.blinding import load_lambda_blinding_factor; load_lambda_blinding_factor()'
+
 fit4_args=(
   --model fit4
   --fit4-order "${FIT4_ORDER}"
@@ -36,6 +40,7 @@ fit4_args=(
   --binsize 15
   --use-gamma-method
   --reviewed-weak-coupling
+  --continuum-thinning
 )
 if [[ "${FIT4_NO_PRIORS}" == "1" ]]; then
   fit4_args+=(--fit4-no-priors)
