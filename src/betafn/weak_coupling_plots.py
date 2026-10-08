@@ -28,9 +28,10 @@ def run_reviewed_weak_coupling_plots(
 
     for window in windows:
         case = load_case(window, "correlated")
-        fig, axes = plt.subplots(1, 3, figsize=(17, 5.3), sharex=True, sharey=True)
+        fig, ax = plt.subplots(figsize=(9.5, 6.5))
         figure11_results[window] = {}
-        for ax, operator in zip(axes, observables):
+        bp_lines = [r"$b_p$ (central; shifted-data range)"]
+        for operator in observables:
             matched = continuum_from_extended_interpolants(
                 bf, flow, operator, window, match_g2, tau0=config.tau0,
                 cov_mode="kernel", kernel="rbf", enforce_domains=True,
@@ -55,28 +56,62 @@ def run_reviewed_weak_coupling_plots(
             mx, my = matched["g2"], matched["beta_over_g4"]
             ax.plot(mx, gv.mean(my), color=op_colors[operator], lw=2.2)
             ax.fill_between(mx, gv.mean(my)-gv.sdev(my), gv.mean(my)+gv.sdev(my),
-                            color=op_colors[operator], alpha=.24, linewidth=0,
-                            label="domain-restricted matching segment")
+                            color=op_colors[operator], alpha=.24, linewidth=0)
 
             xp = np.linspace(0.0, match_window[1], 500)
             central = result["ratio_curve"](xp, "central")
             plus = result["ratio_curve"](xp, "plus_sigma")
             minus = result["ratio_curve"](xp, "minus_sigma")
             ax.fill_between(xp, np.minimum(plus, minus), np.maximum(plus, minus),
-                            color="purple", alpha=.24, linewidth=0,
-                            label=r"matched $\pm1\sigma$ limits")
-            ax.plot(xp, central, color="royalblue", lw=2.1,
-                    label=r"integral-matched $\beta_4$")
-            ax.axvspan(*match_window, facecolor="none", edgecolor="gray",
-                       hatch="///", lw=0, alpha=.45, label="matching interval")
-            _add_pt_curves(ax, np.linspace(0.0, xmax, 500), pt_over_g4)
-            _decorate(ax, fit_watermark,
-                      rf"Fig. 11 integral match: $g^2\in[{match_window[0]:g},{match_window[1]:g}]$",
-                      window, "TLN")
-            ax.set(xlim=(0, xmax), xlabel=r"$g^2_{GF}$")
-            ax.legend(fontsize=7.5, frameon=False, loc="best")
-            print(window, op_labels[operator], "Fig.11 b_p:", result["coefficients"])
-        axes[0].set_ylabel(r"$\beta_{GF}/g_{GF}^4$")
+                            color=op_colors[operator], alpha=.12, linewidth=0)
+            ax.plot(xp, central, color=op_colors[operator], ls="--", lw=2.1,
+                    label=rf"{op_labels[operator]} integral-matched $\beta_4$")
+
+            coefficients = result["coefficients"]
+            coefficient_low = min(
+                coefficients["plus_sigma"], coefficients["minus_sigma"]
+            )
+            coefficient_high = max(
+                coefficients["plus_sigma"], coefficients["minus_sigma"]
+            )
+            bp_lines.append(
+                f"{op_labels[operator]}: {coefficients['central']:.4g} "
+                f"[{coefficient_low:.4g}, {coefficient_high:.4g}]"
+            )
+            print(
+                window, op_labels[operator], "Integral-match b_p:", coefficients
+            )
+
+        ax.axvspan(*match_window, facecolor="none", edgecolor="gray",
+                   hatch="///", lw=0, alpha=.45, label="matching interval")
+        _add_pt_curves(ax, np.linspace(0.0, xmax, 500), pt_over_g4)
+        _decorate(
+            ax,
+            fit_watermark,
+            rf"Integral match: $g^2\in[{match_window[0]:g},{match_window[1]:g}]$",
+            window,
+            "TLN",
+            detail_fontsize=9.2,
+            watermark_fontsize=34,
+        )
+        ax.text(
+            .025, .035, "\n".join(bp_lines), transform=ax.transAxes,
+            fontsize=9.2, ha="left", va="bottom", color="black",
+            bbox={
+                "boxstyle": "round,pad=.35", "facecolor": "white",
+                "edgecolor": "0.65", "alpha": .88,
+            },
+            zorder=30,
+        )
+        ax.set(
+            xlim=(0, xmax), xlabel=r"$g^2_{GF}$",
+            ylabel=r"$\beta_{GF}/g_{GF}^4$",
+        )
+        ax.legend(
+            fontsize=8.2, frameon=False, loc="upper right", ncol=2,
+            columnspacing=.8, handlelength=2.2, labelspacing=.35,
+        )
+        fig.tight_layout()
         save_figure(fig, window, f"figure11_integral_matching_{fit_id}", "correlated")
 
     if not include_extended_to_zero:
@@ -280,11 +315,16 @@ def _add_pt_curves(ax, x, pt_over_g4):
                 lw=1.2, alpha=.75, label=label)
 
 
-def _decorate(ax, watermark, description, window, correction):
-    ax.text(.50, .53, "Preliminary", transform=ax.transAxes, fontsize=29,
+def _decorate(
+    ax, watermark, description, window, correction,
+    detail_fontsize=8.8, watermark_fontsize=29,
+):
+    ax.text(.50, .53, "Preliminary", transform=ax.transAxes,
+            fontsize=watermark_fontsize,
             color="gray", alpha=.23, ha="center", va="center", rotation=30,
             zorder=20, clip_on=True)
     ax.text(.55, .13, watermark + "\n" + description + "\n"
             + rf"$t/a^2\in[{window[0]:g},{window[1]:g}]$, {correction}",
-            transform=ax.transAxes, fontsize=8.8, color="gray", alpha=.82,
+            transform=ax.transAxes, fontsize=detail_fontsize,
+            color="gray", alpha=.82,
             ha="center", va="center", fontweight="bold", zorder=20)
