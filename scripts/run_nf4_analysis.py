@@ -381,15 +381,15 @@ OP_COLORS = {
     's': plt.cm.Greys(0.75),
 }
 
-# Exhaustive integer windows used by the scan reference notebook.
-TMIN_VALUES = tuple(range(3, 8))
+# Exhaustive integer windows spanning the requested flow-time range [4, 8].
+TMIN_VALUES = tuple(range(4, 8))
 TMAX_LIMIT = 8
 WINDOWS = tuple(
     (float(tmin), float(tmax))
     for tmin in TMIN_VALUES
     for tmax in range(tmin + 1, TMAX_LIMIT + 1)
 )
-CENTRAL_WINDOW = (4.0, 6.0)
+CENTRAL_WINDOW = (4.0, 8.0)
 G2_GRID = (0.9, 16.0, 0.1)
 TARGET_G2 = (1.0, 1.5, 3.0, 5.0, 8.0, 10.0, 12.0, 15.8)
 G2_T0 = (8.0 / 5.0) * np.pi**2
@@ -908,8 +908,8 @@ if args.validate_only:
         )
         if not np.all(np.isfinite(smoke_prediction)) or not np.isfinite(smoke_fit.chi2):
             raise RuntimeError('No-prior interpolation smoke fit produced non-finite values.')
-    if WINDOWS[0] != (3.0, 4.0) or WINDOWS[-1] != (7.0, 8.0):
-        raise RuntimeError(f'Flow-time catalogue does not span 3 through 8: {WINDOWS}')
+    if WINDOWS[0] != (4.0, 5.0) or WINDOWS[-1] != (7.0, 8.0):
+        raise RuntimeError(f'Flow-time catalogue does not span 4 through 8: {WINDOWS}')
     if THINNING_FLOW_SPACINGS != (0.10, 0.20, 0.30):
         raise RuntimeError('Unexpected thinning-spacing catalogue.')
     print(f'validation successful: model={FIT_ID}, tag={MODEL_TAG}, parameters={parameter_names}')
