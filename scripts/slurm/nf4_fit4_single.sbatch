@@ -14,6 +14,16 @@ set -euo pipefail
 : "${BETAFN_DATA_DIR:?Set BETAFN_DATA_DIR to the HPCC dataset directory.}"
 : "${BETAFN_OUTPUT_BASE:?Set BETAFN_OUTPUT_BASE to an HPCC output directory.}"
 : "${BETAFN_VENV:?Set BETAFN_VENV to the Python virtual-environment directory.}"
+: "${BETAFN_CONTINUUM_THINNING:=0}"
+
+if [[ "${BETAFN_CONTINUUM_THINNING}" == "1" ]]; then
+  thinning_arg="--continuum-thinning"
+elif [[ "${BETAFN_CONTINUUM_THINNING}" == "0" ]]; then
+  thinning_arg="--no-continuum-thinning"
+else
+  echo "BETAFN_CONTINUUM_THINNING must be 0 or 1; got ${BETAFN_CONTINUUM_THINNING}" >&2
+  exit 2
+fi
 
 BETAFN_REPO_DIR="${BETAFN_REPO_DIR:-${SLURM_SUBMIT_DIR}}"
 cd "${BETAFN_REPO_DIR}"
@@ -40,7 +50,7 @@ fit4_args=(
   --binsize 15
   --use-gamma-method
   --reviewed-weak-coupling
-  --continuum-thinning
+  "${thinning_arg}"
 )
 if [[ "${FIT4_NO_PRIORS}" == "1" ]]; then
   fit4_args+=(--fit4-no-priors)

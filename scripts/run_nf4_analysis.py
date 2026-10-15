@@ -117,7 +117,7 @@ parser.add_argument(
 parser.add_argument(
     '--continuum-thinning',
     action=argparse.BooleanOptionalAction,
-    default=True,
+    default=False,
     help='Run the three-spacing continuum flow-time thinning study.',
 )
 parser.add_argument('--validate-only', action='store_true', help='Validate configuration/model construction, then exit.')
@@ -1376,7 +1376,7 @@ def save_interpolation_diagnostics():
                     out=np.full(len(residual), np.nan), where=residual_sdev > 0,
                 )
                 fit_couplings = [
-                    coupling for coupling in COUPLINGS
+                    coupling for coupling in IV_COUPLINGS
                     if time in bf.iv_fits[coupling]['g2'][FLOW][operator]
                     and time in bf.iv_fits[coupling]['beta'][FLOW][operator]
                 ]
@@ -1517,8 +1517,21 @@ def annotate_infinite_volume_pvalues(ax, values):
     )
 
 
-fig, axes = plt.subplots(2, 5, figsize=(22, 9))
-for ax, coupling in zip(axes.ravel(), COUPLINGS):
+def make_iv_panel_grid(couplings, ncols=5):
+    """Return enough axes for every coupling with IV-fit data."""
+    if not couplings:
+        raise RuntimeError('No infinite-volume couplings are available to plot.')
+    nrows = (len(couplings) + ncols - 1) // ncols
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=(22, 4.5 * nrows), squeeze=False
+    )
+    for ax in axes.ravel()[len(couplings):]:
+        ax.set_visible(False)
+    return fig, axes
+
+
+fig, axes = make_iv_panel_grid(IV_COUPLINGS)
+for ax, coupling in zip(axes.ravel(), IV_COUPLINGS):
     times = sorted(bf.iv_fits[coupling]['g2'][FLOW][OBSERVABLES[0]], key=float)
     time = min(times, key=lambda t: abs(float(t) - CENTRAL_WINDOW[0]))
     pvalues = {}
@@ -1553,9 +1566,9 @@ plt.close(fig)
 
 # Infinite-volume extrapolation: beta_GF versus 1/V
 
-fig, axes = plt.subplots(2, 5, figsize=(22, 9))
+fig, axes = make_iv_panel_grid(IV_COUPLINGS)
 
-for ax, coupling in zip(axes.ravel(), COUPLINGS):
+for ax, coupling in zip(axes.ravel(), IV_COUPLINGS):
   available_times = sorted(
       bf.iv_fits[coupling]['beta'][FLOW][OBSERVABLES[0]],
       key=float,
@@ -1689,9 +1702,9 @@ plt.close(fig)
 # Infinite-volume extrapolation:
 # beta_GF / g_GF^4 versus 1/V
 
-fig, axes = plt.subplots(2, 5, figsize=(22, 9))
+fig, axes = make_iv_panel_grid(IV_COUPLINGS)
 
-for ax, coupling in zip(axes.ravel(), COUPLINGS):
+for ax, coupling in zip(axes.ravel(), IV_COUPLINGS):
   available_times = sorted(
       bf.iv_fits[coupling]['beta'][FLOW][OBSERVABLES[0]],
       key=float,

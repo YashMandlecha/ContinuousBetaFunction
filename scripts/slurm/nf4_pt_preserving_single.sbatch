@@ -13,6 +13,16 @@ set -euo pipefail
 : "${BETAFN_DATA_DIR:?Set BETAFN_DATA_DIR to the HPCC dataset directory.}"
 : "${BETAFN_OUTPUT_BASE:?Set BETAFN_OUTPUT_BASE to an HPCC output directory.}"
 : "${BETAFN_VENV:?Set BETAFN_VENV to the Python virtual-environment directory.}"
+: "${BETAFN_CONTINUUM_THINNING:=0}"
+
+if [[ "${BETAFN_CONTINUUM_THINNING}" == "1" ]]; then
+  thinning_arg="--continuum-thinning"
+elif [[ "${BETAFN_CONTINUUM_THINNING}" == "0" ]]; then
+  thinning_arg="--no-continuum-thinning"
+else
+  echo "BETAFN_CONTINUUM_THINNING must be 0 or 1; got ${BETAFN_CONTINUUM_THINNING}" >&2
+  exit 2
+fi
 
 if [[ ! "${NF4_MODEL}" =~ ^fit(1|2|3|5|6|7|8|9|10|11|12)$ ]]; then
   echo "NF4_MODEL must be fit1--fit3 or fit5--fit12; got ${NF4_MODEL}" >&2
@@ -67,4 +77,4 @@ srun python -u scripts/run_nf4_analysis.py \
   --binsize 15 \
   --use-gamma-method \
   --reviewed-weak-coupling \
-  --continuum-thinning
+  "${thinning_arg}"
