@@ -354,10 +354,22 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     'slurm_array_task_id': os.environ.get('SLURM_ARRAY_TASK_ID'),
 }, indent=2) + '\n')
 
-COUPLINGS = ('20p0', '18p0', '16p0', '14p0', '12p0', '11p0', '10p0', '9p50', '9p00', '8p50')
+STRONG_COUPLINGS = ('7p00', '7p125', '7p25', '7p50')
+WEAK_COUPLINGS = (
+    '8p00', '8p50', '9p00', '9p50', '10p0', '11p0',
+    '12p0', '14p0', '16p0', '18p0', '20p0',
+)
+COUPLINGS = STRONG_COUPLINGS + WEAK_COUPLINGS
+STRONG_VOLUMES = ('l20l20l20t40', 'l24l24l24t48', 'l32l32l32t64')
 VOLUMES = {
-    coupling: ('l32l32l32t64', 'l40l40l40t80', 'l48l48l48t96')
-    for coupling in COUPLINGS
+    **{coupling: STRONG_VOLUMES for coupling in STRONG_COUPLINGS},
+    '8p00': (
+        'l32l32l32t64', 'l40l40l40t80', 'l48l48l48t96',
+    ),
+    **{
+        coupling: ('l32l32l32t64', 'l40l40l40t80', 'l48l48l48t96')
+        for coupling in WEAK_COUPLINGS if coupling != '8p00'
+    },
 }
 FLOW = 'wilson'
 OBSERVABLES = ('p', 'c', 's')
@@ -378,8 +390,10 @@ WINDOWS = tuple(
     for tmax in range(tmin + 1, TMAX_LIMIT + 1)
 )
 CENTRAL_WINDOW = (4.0, 6.0)
-G2_GRID = (0.9, 4.9, 0.1)
-TARGET_G2 = (1.1, 1.3, 1.5, 1.8, 2.2, 2.6, 3.0, 4.0)
+G2_GRID = (0.9, 16.0, 0.1)
+TARGET_G2 = (1.0, 1.5, 3.0, 5.0, 8.0, 10.0, 12.0, 15.8)
+G2_T0 = (8.0 / 5.0) * np.pi**2
+PLOT_MSBAR_LAMBDA = False
 THINNING_FLOW_SPACINGS = (0.10, 0.20, 0.30)
 THINNING_CONTINUUM_CASES = {
     'diagonal': {
@@ -402,11 +416,14 @@ def case_dir(window, mode=None):
     path.mkdir(parents=True, exist_ok=True)
     return path
 
-def save_figure(fig, window, name, mode=None):
-    base = case_dir(window, mode) / name
+def add_fit_footer(fig):
     if FIT_FOOTER is not None:
         fig.text(0.995, 0.005, FIT_FOOTER, ha='right', va='bottom',
                  fontsize=8, color='gray', alpha=.75)
+
+def save_figure(fig, window, name, mode=None):
+    base = case_dir(window, mode) / name
+    add_fit_footer(fig)
     fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
     fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
     plt.close(fig)
@@ -416,6 +433,14 @@ def beta_value(coupling):
 
 def volume_value(volume):
     return np.prod([float(x) for x in volume.replace('t', 'l').split('l')[1:] if x])
+
+def coupling_figure(couplings, ncols=5):
+    nrows = max(1, int(np.ceil(len(couplings) / ncols)))
+    return plt.subplots(
+        nrows, ncols,
+        figsize=(4.4 * ncols, 4.2 * nrows),
+        squeeze=False,
+    )
 
 def flow_times(window):
     return [t for t in sorted(bf.ntrp_fits[FLOW][OBSERVABLES[0]], key=float)
@@ -912,7 +937,13 @@ fig, ax = plt.subplots(figsize=(8, 6))
 for operator in OBSERVABLES:
     first = True
     for coupling in sorted(bf.avg_data, key=beta_value):
-        volume = max(bf.avg_data[coupling], key=volume_value)
+        massless_volumes = [
+            volume for volume in bf.avg_data[coupling]
+            if '0p00' in bf.avg_data[coupling][volume]
+        ]
+        if not massless_volumes:
+            continue
+        volume = max(massless_volumes, key=volume_value)
         _, g2 = bf.processed_series(coupling, volume, '0p00', FLOW, operator, 'g2')
         _, beta = bf.processed_series(coupling, volume, '0p00', FLOW, operator, 'beta')
         ratio = np.asarray([b / x**2 for x, b in zip(g2, beta)], dtype=object)
@@ -920,7 +951,10 @@ for operator in OBSERVABLES:
                     alpha=.6, color=OP_COLORS[operator],
                     label=OP_LABELS[operator] if first else None)
         first = False
-ax.set(xlabel=r'$g^2_{GF}$', ylabel=r'$\beta_{GF}/g_{GF}^4$', title='Processed largest-volume data (TLN)')
+ax.set(
+    xlabel=r'$g^2_{GF}$', ylabel=r'$\beta_{GF}/g_{GF}^4$',
+    title='Directly simulated massless largest-volume data (TLN)',
+)
 ax.legend(frameon=False)
 base = OUTPUT_ROOT / f'processed_largest_volume_{FIT_ID}'
 if FIT_FOOTER is not None:
@@ -943,6 +977,377 @@ reparameterize_fit12_interpolations()
 print(bf.stage_summary('chiral'))
 print(bf.stage_summary('infinite_volume'))
 print(bf.stage_summary('interpolation'))
+
+
+# ## Chiral-extrapolation diagnostics and raw massless IV data
+
+ACTIVE_COUPLINGS = tuple(sorted(bf.avg_data, key=beta_value))
+ACTIVE_STRONG_COUPLINGS = tuple(
+    coupling for coupling in STRONG_COUPLINGS if coupling in bf.avg_data
+)
+MISSING_STRONG_COUPLINGS = tuple(
+    coupling for coupling in STRONG_COUPLINGS if coupling not in bf.avg_data
+)
+IV_COUPLINGS = tuple(
+    coupling for coupling in ACTIVE_COUPLINGS
+    if coupling in bf.iv_fits
+    and any(
+        bf.iv_fits[coupling]['g2'][FLOW][operator]
+        for operator in OBSERVABLES
+    )
+)
+
+print('active couplings:', ACTIVE_COUPLINGS)
+print('strong couplings awaiting data:', MISSING_STRONG_COUPLINGS or 'none')
+
+EXPECTED_CHIRAL_MASSES = ('0p001', '0p0025', '0p005')
+inventory_rows = []
+for coupling in STRONG_COUPLINGS:
+    if coupling not in bf.avg_data:
+        inventory_rows.append({
+            'coupling': coupling,
+            'beta_b': beta_value(coupling),
+            'volume': 'all configured volumes',
+            'finite_masses': '',
+            'massless_limit_available': False,
+            'status': 'awaiting files',
+        })
+        continue
+    for volume in VOLUMES[coupling]:
+        volume_data = bf.avg_data[coupling].get(volume, {})
+        finite_masses = sorted(
+            (mass for mass in volume_data if mass != '0p00'),
+            key=lambda mass: float(mass.replace('p', '.')),
+        )
+        inventory_rows.append({
+            'coupling': coupling,
+            'beta_b': beta_value(coupling),
+            'volume': volume,
+            'finite_masses': ', '.join(finite_masses),
+            'massless_limit_available': '0p00' in volume_data,
+            'status': (
+                'ready'
+                if tuple(finite_masses) == EXPECTED_CHIRAL_MASSES
+                else 'incomplete mass set'
+            ),
+        })
+
+chiral_inventory = pd.DataFrame(inventory_rows)
+chiral_inventory.to_csv(
+    OUTPUT_ROOT / 'chiral_ensemble_inventory.csv', index=False
+)
+print(chiral_inventory.to_string(index=False))
+
+chiral_quality_rows = []
+for coupling in ACTIVE_STRONG_COUPLINGS:
+    for volume in VOLUMES[coupling]:
+        if volume not in bf.ch_fits.get(coupling, {}):
+            continue
+        for quantity in ('g2', 'beta'):
+            for operator in OBSERVABLES:
+                fits = bf.ch_fits[coupling][volume][quantity][FLOW][operator]
+                qualities = bf.ch_qof[coupling][volume][quantity][FLOW][operator]
+                for flow_time, parameters in fits.items():
+                    quality = qualities[flow_time]
+                    intercept = bf.chiral.model.evaluate(0.0, parameters)
+                    chiral_quality_rows.append({
+                        'coupling': coupling,
+                        'beta_b': beta_value(coupling),
+                        'volume': volume,
+                        'quantity': quantity,
+                        'operator': operator,
+                        'flow_time': float(flow_time),
+                        'intercept_mean': float(gv.mean(intercept)),
+                        'intercept_sdev': float(gv.sdev(intercept)),
+                        'chi2': float(quality['chi2']),
+                        'dof': int(quality['dof']),
+                        'p_value': float(quality['p-value']),
+                    })
+
+chiral_fit_quality = pd.DataFrame(chiral_quality_rows)
+chiral_fit_quality.to_csv(
+    OUTPUT_ROOT / 'chiral_fit_quality_summary.csv', index=False
+)
+print(chiral_fit_quality.to_string(index=False))
+
+CHIRAL_PLOT_TIMES = (4.0, 6.0, 8.0)
+CHIRAL_TIME_COLORS = dict(zip(
+    CHIRAL_PLOT_TIMES,
+    plt.cm.viridis(np.linspace(0.15, 0.85, len(CHIRAL_PLOT_TIMES))),
+))
+
+
+def plot_chiral_extrapolations(quantity):
+    ylabel = r'$g^2_{\mathrm{GF}}$' if quantity == 'g2' else r'$\beta_{\mathrm{GF}}$'
+    for coupling in ACTIVE_STRONG_COUPLINGS:
+        volumes = [
+            volume for volume in VOLUMES[coupling]
+            if volume in bf.ch_fits.get(coupling, {})
+            and any(
+                bf.ch_fits[coupling][volume]['g2'][FLOW][operator]
+                for operator in OBSERVABLES
+            )
+        ]
+        if not volumes:
+            continue
+        fig, axes = plt.subplots(
+            len(volumes), len(OBSERVABLES),
+            figsize=(15, 4.2 * len(volumes)),
+            squeeze=False,
+        )
+        for row, volume in enumerate(volumes):
+            for column, operator in enumerate(OBSERVABLES):
+                ax = axes[row, column]
+                available = sorted(
+                    bf.ch_fits[coupling][volume][quantity][FLOW][operator],
+                    key=float,
+                )
+                selected = []
+                selected_times = set()
+                for target in CHIRAL_PLOT_TIMES:
+                    if not available:
+                        continue
+                    flow_time = min(
+                        available,
+                        key=lambda value: abs(float(value) - target),
+                    )
+                    if flow_time not in selected_times:
+                        selected.append((target, flow_time))
+                        selected_times.add(flow_time)
+
+                pvalue_lines = []
+                for target, flow_time in selected:
+                    data = bf.chiral.fetch(
+                        'inputs',
+                        (coupling, volume, quantity, FLOW, operator, flow_time),
+                    )
+                    parameters = bf.chiral.fetch(
+                        'fits',
+                        (coupling, volume, quantity, FLOW, operator, flow_time),
+                    )
+                    quality = bf.chiral.fetch(
+                        'quality',
+                        (coupling, volume, quantity, FLOW, operator, flow_time),
+                    )
+                    masses = np.asarray(data.x, dtype=float)
+                    values = np.asarray(data.y, dtype=object)
+                    mass_grid = np.linspace(0.0, 1.05 * masses.max(), 160)
+                    curve = np.asarray([
+                        bf.chiral.model.evaluate(mass, parameters)
+                        for mass in mass_grid
+                    ], dtype=object)
+                    intercept = bf.chiral.model.evaluate(0.0, parameters)
+                    color = CHIRAL_TIME_COLORS[target]
+                    label = rf'$t/a^2={float(flow_time):g}$'
+                    ax.errorbar(
+                        masses, gv.mean(values), yerr=gv.sdev(values),
+                        fmt='o', ms=4, capsize=3, color=color, label=label,
+                    )
+                    ax.plot(mass_grid, gv.mean(curve), color=color, lw=1.5)
+                    ax.fill_between(
+                        mass_grid,
+                        gv.mean(curve) - gv.sdev(curve),
+                        gv.mean(curve) + gv.sdev(curve),
+                        color=color, alpha=.14, linewidth=0,
+                    )
+                    ax.errorbar(
+                        [0.0], [gv.mean(intercept)], yerr=[gv.sdev(intercept)],
+                        fmt='s', ms=5, capsize=3, color=color,
+                        markeredgecolor='black', markeredgewidth=.4,
+                    )
+                    pvalue_lines.append(
+                        rf'$t={float(flow_time):g}$: '
+                        rf'$p={100.0 * float(quality["p-value"]):.1f}\%$'
+                    )
+
+                spatial_extent = int(volume.split('l')[1])
+                ax.set_xlabel(r'$am_f$')
+                ax.text(
+                    .97, .97,
+                    rf'$\beta_b={beta_value(coupling):g}$, '
+                    + OP_LABELS[operator]
+                    + '\n'
+                    + rf'$L/a={spatial_extent}$',
+                    transform=ax.transAxes,
+                    ha='right', va='top', fontsize=10.5,
+                )
+                ax.text(
+                    .03, .97, '\n'.join(pvalue_lines),
+                    transform=ax.transAxes,
+                    ha='left', va='top', fontsize=8.5,
+                )
+
+        handles, labels = axes[0, 0].get_legend_handles_labels()
+        fig.legend(
+            handles, labels, ncol=max(1, len(handles)),
+            loc='upper center', frameon=False,
+        )
+        fig.supylabel(ylabel)
+        fig.tight_layout(rect=(.03, .02, 1, .93))
+        base = OUTPUT_ROOT / f'chiral_extrapolation_{quantity}_{coupling}_{FIT_ID}'
+        add_fit_footer(fig)
+        fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
+        fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+
+plot_chiral_extrapolations('g2')
+plot_chiral_extrapolations('beta')
+
+# Confirm that the extrapolated strong-coupling points join the directly
+# simulated massless weak-coupling data used downstream.
+fig, ax = plt.subplots(figsize=(9, 6.5))
+for operator in OBSERVABLES:
+    first = True
+    for coupling in ACTIVE_COUPLINGS:
+        massless_volumes = [
+            volume for volume in bf.avg_data[coupling]
+            if '0p00' in bf.avg_data[coupling][volume]
+        ]
+        if not massless_volumes:
+            continue
+        volume = max(massless_volumes, key=volume_value)
+        _, g2 = bf.processed_series(
+            coupling, volume, '0p00', FLOW, operator, 'g2'
+        )
+        _, beta = bf.processed_series(
+            coupling, volume, '0p00', FLOW, operator, 'beta'
+        )
+        ratio = np.asarray(beta, dtype=object) / np.asarray(g2, dtype=object)**2
+        ax.errorbar(
+            gv.mean(g2), gv.mean(ratio), yerr=gv.sdev(ratio),
+            fmt='o', ms=2.5, alpha=.6, color=OP_COLORS[operator],
+            label=OP_LABELS[operator] if first else None,
+        )
+        first = False
+ax.set(
+    xlabel=r'$g^2_{\mathrm{GF}}$',
+    ylabel=r'$\beta_{\mathrm{GF}}/g_{\mathrm{GF}}^4$',
+    title='Massless-limit largest-volume data after chiral extrapolation',
+)
+ax.legend(frameon=False)
+base = OUTPUT_ROOT / f'processed_massless_limit_largest_volume_{FIT_ID}'
+add_fit_footer(fig)
+fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
+fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
+plt.close(fig)
+
+# Raw massless infinite-volume intercepts before interpolation.
+fig, axes = plt.subplots(1, 2, figsize=(15, 6.2), sharex=True)
+ordered_iv_couplings = tuple(
+    sorted(IV_COUPLINGS, key=beta_value, reverse=True)
+)
+qualitative_colors = tuple(plt.get_cmap('tab20').colors)
+beta_colors = {
+    coupling: qualitative_colors[index % len(qualitative_colors)]
+    for index, coupling in enumerate(ordered_iv_couplings)
+}
+operator_markers = {'p': 'o', 'c': 's', 's': '^'}
+
+for coupling in ordered_iv_couplings:
+    color = beta_colors[coupling]
+    for operator in OBSERVABLES:
+        g2_fits = bf.iv_fits[coupling]['g2'][FLOW][operator]
+        beta_fits = bf.iv_fits[coupling]['beta'][FLOW][operator]
+        common_times = sorted(set(g2_fits) & set(beta_fits), key=float)
+        for flow_time in common_times:
+            g2_iv = bf.infinite_volume.model.evaluate(0.0, g2_fits[flow_time])
+            beta_iv = bf.infinite_volume.model.evaluate(
+                0.0, beta_fits[flow_time]
+            )
+            ratio_iv = beta_iv / g2_iv**2
+            style = {
+                'fmt': operator_markers[operator],
+                'ms': 3.8,
+                'capsize': 2,
+                'color': color,
+                'alpha': .58,
+                'linestyle': 'none',
+            }
+            axes[0].errorbar(
+                gv.mean(g2_iv), gv.mean(beta_iv),
+                xerr=gv.sdev(g2_iv), yerr=gv.sdev(beta_iv), **style,
+            )
+            axes[1].errorbar(
+                gv.mean(g2_iv), gv.mean(ratio_iv),
+                xerr=gv.sdev(g2_iv), yerr=gv.sdev(ratio_iv), **style,
+            )
+
+axes[0].set(
+    xlabel=r'$g^2_{\mathrm{GF}}$', ylabel=r'$\beta_{\mathrm{GF}}$',
+    title=r'Raw massless IV data: $\beta_{\mathrm{GF}}$',
+)
+axes[1].set(
+    xlabel=r'$g^2_{\mathrm{GF}}$',
+    ylabel=r'$\beta_{\mathrm{GF}}/g_{\mathrm{GF}}^4$',
+    title=r'Raw massless IV data: $\beta_{\mathrm{GF}}/g_{\mathrm{GF}}^4$',
+)
+plot_xmax = max(G2_GRID[1], G2_T0) + 0.25
+xp_pt = np.linspace(0.001, plot_xmax, 900)
+pt_styles = (
+    (1, ':', '1-loop'),
+    (2, '-.', '2-loop'),
+    (3, '-', '3-loop'),
+)
+for loops, linestyle, label in pt_styles:
+    ratio_pt = pt_over_g4(xp_pt, loops)
+    axes[0].plot(
+        xp_pt, xp_pt**2 * ratio_pt,
+        color='gray', ls=linestyle, lw=1.5, zorder=1,
+    )
+    axes[1].plot(
+        xp_pt, ratio_pt,
+        color='gray', ls=linestyle, lw=1.5, zorder=1,
+    )
+for ax in axes:
+    ax.set_xlim(0.0, plot_xmax)
+    ax.axvline(G2_T0, color='black', linestyle='--', lw=1.5, zorder=1)
+axes[0].set_ylim(-13.0, 0.5)
+operator_handles = [
+    Line2D(
+        [0], [0], marker=operator_markers[operator], linestyle='none',
+        color='gray', markeredgecolor='black', markeredgewidth=.4,
+        label=OP_LABELS[operator],
+    )
+    for operator in OBSERVABLES
+]
+coupling_handles = [
+    Line2D(
+        [0], [0], marker='o', linestyle='none',
+        color=beta_colors[coupling], markersize=6,
+        label=rf'$\beta_b={beta_value(coupling):g}$',
+    )
+    for coupling in ordered_iv_couplings
+]
+pt_handles = [
+    Line2D(
+        [0], [0], color='gray', linestyle=linestyle,
+        lw=1.5, label=label,
+    )
+    for _, linestyle, label in pt_styles
+]
+t0_handle = Line2D(
+    [0], [0], color='black', linestyle='--', lw=1.5,
+    label=rf'$g^2_{{\mathrm{{GF}}}}(t_0)=\frac{{8}}{{5}}\pi^2={G2_T0:.9f}$',
+)
+axes[0].legend(
+    handles=operator_handles + pt_handles + [t0_handle],
+    frameon=False, fontsize=8.5, ncol=2,
+)
+axes[1].legend(
+    handles=coupling_handles, frameon=False, fontsize=8,
+    ncol=2, title=r'bare coupling',
+)
+fig.suptitle(
+    r'Massless infinite-volume data before interpolation '
+    r'($\beta_b=20$ through the strongest available coupling)',
+)
+fig.tight_layout(rect=(0, 0, 1, .94))
+base = OUTPUT_ROOT / f'massless_infinite_volume_beta_and_ratio_vs_g2_{FIT_ID}'
+add_fit_footer(fig)
+fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
+fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
+plt.close(fig)
 
 
 def save_interpolation_diagnostics():
@@ -1957,7 +2362,7 @@ for window in WINDOWS:
 
 
 def continuum_panel_times(case, window, operator, g2, tau0):
-      """Return exact fit times and regularly spaced neighboring points."""
+      """Return fit times and one terminal point one flow-time unit beyond each edge."""
       all_times = sorted(
           bf.ntrp_fits[FLOW][operator],
           key=float,
@@ -1997,78 +2402,42 @@ def continuum_panel_times(case, window, operator, g2, tau0):
           ]
       fit_times = sorted(fit_times, key=float)
 
-      # For thinning studies, use the exact active spacing.  For the standard
-      # analysis, infer the native spacing from the available flow times.
-      spacing = case.get('spacing')
-      if spacing is None:
-          nominal_valid = np.asarray(
-              sorted(float(time) - tau0 for time in valid_times),
-              dtype=float,
-          )
-          differences = np.diff(nominal_valid)
-          differences = differences[differences > 1e-10]
-          spacing = float(np.min(differences)) if len(differences) else None
-      else:
-          spacing = float(spacing)
+      valid_nominal = np.asarray(
+          [float(time) - tau0 for time in valid_times], dtype=float
+      )
+      valid_steps = np.diff(valid_nominal)
+      valid_steps = valid_steps[valid_steps > 1e-10]
+      grid_tolerance = (
+          0.51 * float(np.median(valid_steps))
+          if len(valid_steps)
+          else 1e-8
+      )
 
+      terminal_targets = (window[0] - 1.0, window[1] + 1.0)
       outside_times = []
-      if spacing is not None and spacing > 0.0:
-          # Show every valid point from one flow-time unit below the fit window
-          # through one unit above it, using the same spacing as the fit.  The
-          # window endpoints themselves remain filled because they are fitted.
-          left_targets = np.arange(
-              window[0] - spacing,
-              window[0] - 1.0 - 0.5 * spacing,
-              -spacing,
+      for target in terminal_targets:
+          candidates = [
+              time for time in valid_times
+              if window[0] - 1.0 - 1e-10
+              <= float(time) - tau0
+              <= window[1] + 1.0 + 1e-10
+              and not window[0]
+              <= float(time) - tau0
+              <= window[1]
+          ]
+          if not candidates:
+              continue
+          nearest = min(
+              candidates,
+              key=lambda time: abs((float(time) - tau0) - target),
           )
-          right_targets = np.arange(
-              window[1] + spacing,
-              window[1] + 1.0 + 0.5 * spacing,
-              spacing,
-          )
-          # Preserve the original points exactly one unit outside the window
-          # when a spacing (notably 0.3) does not divide that unit interval.
-          left_outer = window[0] - 1.0
-          right_outer = window[1] + 1.0
-          if not np.any(np.isclose(
-              left_targets, left_outer, rtol=0.0, atol=1e-10
-          )):
-              left_targets = np.append(left_targets, left_outer)
-          if not np.any(np.isclose(
-              right_targets, right_outer, rtol=0.0, atol=1e-10
-          )):
-              right_targets = np.append(right_targets, right_outer)
-          neighbor_specs = (
-              (
-                  left_targets,
-                  lambda nominal: window[0] - 1.0 - 1e-10
-                  <= nominal < window[0] - 1e-10,
-              ),
-              (
-                  right_targets,
-                  lambda nominal: window[1] + 1e-10
-                  < nominal <= window[1] + 1.0 + 1e-10,
-              ),
-          )
-          for targets, is_in_interval in neighbor_specs:
-              candidates = [
-                  time
-                  for time in valid_times
-                  if is_in_interval(float(time) - tau0)
-              ]
-              for target in targets:
-                  if not candidates:
-                      break
-                  nearest = min(
-                      candidates,
-                      key=lambda time: abs((float(time) - tau0) - target),
-                  )
-                  if nearest not in outside_times:
-                      outside_times.append(nearest)
+          if (
+              abs((float(nearest) - tau0) - target) <= grid_tolerance
+              and nearest not in outside_times
+          ):
+              outside_times.append(nearest)
 
-      outside_times = sorted(outside_times, key=float)
-
-      return fit_times, outside_times
+      return fit_times, sorted(outside_times, key=float)
 
 
 def plot_continuum_panels(window, mode, divide_by_g4):
@@ -2158,8 +2527,7 @@ def plot_continuum_panels(window, mode, divide_by_g4):
                       zorder=4,
                   )
 
-              # Hollow points: all valid neighboring points, sampled with the
-              # same flow-time spacing as the points used in the fit.
+              # Hollow points: one terminal point one flow-time unit beyond each edge.
               if outside_times:
                   xoutside, youtside = continuum_plot_values(outside_times)
 
@@ -2263,7 +2631,7 @@ def plot_continuum_panels(window, mode, divide_by_g4):
               + correction_label
               + '\n'
               + 'Filled points: included in fit; '
-              + 'hollow points: neighboring one-unit intervals at the fit spacing'
+              + 'hollow points: terminal values one flow-time unit beyond each boundary'
           ),
           fontsize=11,
           color='gray',
@@ -2479,6 +2847,10 @@ def plot_final_curve(window, mode, divide_by_g4):
           )
 
           if divide_by_g4:
+              # Keep the established scaled-plot range and y scaling.
+              visible = (0.0 <= x) & (x <= 5.0)
+              x = x[visible]
+              y = y[visible]
               y = y / x**2
 
           # Sort explicitly so the lines and bands cannot cross because of
@@ -2508,8 +2880,12 @@ def plot_final_curve(window, mode, divide_by_g4):
               zorder=2,
           )
 
-      # Perturbative comparison curves.
-      xp = np.linspace(.001, 5.0, 500)
+      # Perturbative comparison curves over the complete displayed range.
+      plot_xmax = (
+          5.0 if divide_by_g4
+          else max(G2_GRID[1], G2_T0) + .25
+      )
+      xp = np.linspace(.001, plot_xmax, 900)
       pt_curves = (
           (1, '-', '1-loop universal'),
           (2, '--', '2-loop universal'),
@@ -2577,8 +2953,16 @@ def plot_final_curve(window, mode, divide_by_g4):
           clip_on=True,
       )
 
+      if not divide_by_g4:
+          ax.axvline(
+              G2_T0, color='black', linestyle=':', lw=1.5,
+              label=rf'$g^2_{{\mathrm{{GF}}}}(t_0)=\frac{{8}}{{5}}\pi^2={G2_T0:.9f}$',
+              zorder=1,
+          )
+          ax.set_ylim(-13.0, 0.5)
+
       ax.set(
-          xlim=(0, 5),
+          xlim=(0, plot_xmax),
           xlabel=r'$g^2_{GF}$',
           ylabel=quantity_label,
       )
@@ -3609,7 +3993,6 @@ if args.reviewed_weak_coupling:
         pt_over_g4=pt_over_g4,
         load_case=load_case,
         save_figure=save_figure,
-        include_extended_to_zero=FIT_ID not in ('fit1', 'fit2', 'fit11', 'fit12'),
     )
     lambda_parameter_results = run_lambda_parameter_plots(
         bf=bf,
@@ -3624,6 +4007,7 @@ if args.reviewed_weak_coupling:
         load_case=load_case,
         figure11_results=reviewed_weak_results['figure11'],
         output_root=OUTPUT_ROOT,
+        plot_msbar=PLOT_MSBAR_LAMBDA,
     )
 
 
