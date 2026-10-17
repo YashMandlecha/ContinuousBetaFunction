@@ -65,6 +65,10 @@ def parse_args() -> argparse.Namespace:
         "--no-priors", action="store_true",
         help="Submit one prior-free, xerrors=False job for each requested order.",
     )
+    parser.add_argument(
+        "--thinning-only", action="store_true",
+        help="Run only the continuum thinning scan after its prerequisite stages.",
+    )
     parser.add_argument("--time", default="24:00:00", help="SLURM wall time")
     parser.add_argument("--cpus", type=positive_int, default=8)
     parser.add_argument("--memory", default="64G")
@@ -94,12 +98,15 @@ def main() -> int:
         for width in widths:
             no_priors = width is None
             job_name = f"nf4-o{order}-nopriors" if no_priors else f"nf4-o{order}-w{width_tag(width)}"
+            if args.thinning_only:
+                job_name += "-thin"
             exported = ",".join(
                 (
                     "ALL",
                     f"FIT4_ORDER={order}",
                     f"FIT4_WIDTH={10 if no_priors else width_text(width)}",
                     f"FIT4_NO_PRIORS={1 if no_priors else 0}",
+                    f"BETAFN_THINNING_ONLY={1 if args.thinning_only else 0}",
                     f"BETAFN_REPO_DIR={REPO_ROOT}",
                     f"BETAFN_DATA_DIR={environment['BETAFN_DATA_DIR']}",
                     f"BETAFN_OUTPUT_BASE={environment['BETAFN_OUTPUT_BASE']}",

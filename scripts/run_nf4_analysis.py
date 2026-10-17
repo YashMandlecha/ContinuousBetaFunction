@@ -120,6 +120,15 @@ parser.add_argument(
     default=False,
     help='Run the three-spacing continuum flow-time thinning study.',
 )
+parser.add_argument(
+    '--thinning-only',
+    action='store_true',
+    help=(
+        'Run the prerequisite processing, chiral, infinite-volume, and '
+        'interpolation stages, then run only the continuum thinning scan; '
+        'skip the standard continuum analysis and its downstream plots.'
+    ),
+)
 parser.add_argument('--validate-only', action='store_true', help='Validate configuration/model construction, then exit.')
 args = parser.parse_args()
 RUN_STARTED = time_module.time()
@@ -132,6 +141,9 @@ if args.fit4_width <= 0:
     parser.error('--fit4-width must be positive.')
 if args.fit4_no_priors and args.model != 'fit4':
     parser.error('--fit4-no-priors is only valid with --model fit4.')
+if args.thinning_only:
+    args.continuum_thinning = True
+RUN_FULL_ANALYSIS = not args.thinning_only
 if args.latex:
     missing_tex_tools = [name for name in ('latex', 'dvipng') if shutil.which(name) is None]
     if missing_tex_tools:
@@ -303,7 +315,11 @@ else:
 
 OUTPUT_ROOT = args.output_base.expanduser().resolve() / OUTPUT_FAMILY / MODEL_TAG
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-(OUTPUT_ROOT / 'run_configuration.json').write_text(json.dumps({
+RUN_CONFIGURATION_NAME = (
+    'run_configuration.json'
+    if RUN_FULL_ANALYSIS else 'run_configuration_thinning_only.json'
+)
+(OUTPUT_ROOT / RUN_CONFIGURATION_NAME).write_text(json.dumps({
     'model': FIT_ID,
     'model_tag': MODEL_TAG,
     'fit1_order': args.fit1_order if FIT_ID == 'fit1' else None,
@@ -348,6 +364,7 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     'latex': args.latex,
     'reviewed_weak_coupling': args.reviewed_weak_coupling,
     'continuum_thinning': args.continuum_thinning,
+    'thinning_only': args.thinning_only,
     'flow_time_limits': [3.0, 8.0],
     'thinning_flow_spacings': [0.10, 0.20, 0.30],
     'slurm_job_id': os.environ.get('SLURM_JOB_ID'),
@@ -389,6 +406,7 @@ WINDOWS = tuple(
     for tmin in TMIN_VALUES
     for tmax in range(tmin + 1, TMAX_LIMIT + 1)
 )
+FULL_ANALYSIS_WINDOWS = WINDOWS if RUN_FULL_ANALYSIS else ()
 CENTRAL_WINDOW = (4.0, 8.0)
 G2_GRID = (0.9, 16.0, 0.1)
 TARGET_G2 = (1.0, 1.5, 3.0, 5.0, 8.0, 10.0, 12.0, 15.8)
@@ -1194,46 +1212,56 @@ def plot_chiral_extrapolations(quantity):
 plot_chiral_extrapolations('g2')
 plot_chiral_extrapolations('beta')
 
-# Confirm that the extrapolated strong-coupling points join the directly
-# simulated massless weak-coupling data used downstream.
-fig, ax = plt.subplots(figsize=(9, 6.5))
-for operator in OBSERVABLES:
-    first = True
-    for coupling in ACTIVE_COUPLINGS:
-        massless_volumes = [
-            volume for volume in bf.avg_data[coupling]
-            if '0p00' in bf.avg_data[coupling][volume]
-        ]
-        if not massless_volumes:
-            continue
-        volume = max(massless_volumes, key=volume_value)
-        _, g2 = bf.processed_series(
-            coupling, volume, '0p00', FLOW, operator, 'g2'
-        )
-        _, beta = bf.processed_series(
-            coupling, volume, '0p00', FLOW, operator, 'beta'
-        )
-        ratio = np.asarray(beta, dtype=object) / np.asarray(g2, dtype=object)**2
-        ax.errorbar(
-            gv.mean(g2), gv.mean(ratio), yerr=gv.sdev(ratio),
-            fmt='o', ms=2.5, alpha=.6, color=OP_COLORS[operator],
-            label=OP_LABELS[operator] if first else None,
-        )
-        first = False
-ax.set(
-    xlabel=r'$g^2_{\mathrm{GF}}$',
-    ylabel=r'$\beta_{\mathrm{GF}}/g_{\mathrm{GF}}^4$',
-    title='Massless-limit largest-volume data after chiral extrapolation',
-)
-ax.legend(frameon=False)
-base = OUTPUT_ROOT / f'processed_massless_limit_largest_volume_{FIT_ID}'
-add_fit_footer(fig)
-fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
-fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
-plt.close(fig)
+# Confirm that the massless data used downstream are mutually consistent
+# after the infinite-volume extrapolation.  Keep each flow-time window
+# separate so the plotted sample is exactly the sample used by that scan.
+def plot_processed_massless_infinite_volume(window):
+    fig, ax = plt.subplots(figsize=(9, 6.5))
+    for operator in OBSERVABLES:
+        first = True
+        for coupling in sorted(IV_COUPLINGS, key=beta_value, reverse=True):
+            g2_fits = bf.iv_fits[coupling]['g2'][FLOW][operator]
+            beta_fits = bf.iv_fits[coupling]['beta'][FLOW][operator]
+            common_times = [
+                flow_time
+                for flow_time in sorted(set(g2_fits) & set(beta_fits), key=float)
+                if window[0] <= float(flow_time) <= window[1]
+            ]
+            for flow_time in common_times:
+                g2_iv = bf.infinite_volume.model.evaluate(
+                    0.0, g2_fits[flow_time]
+                )
+                beta_iv = bf.infinite_volume.model.evaluate(
+                    0.0, beta_fits[flow_time]
+                )
+                ratio_iv = beta_iv / g2_iv**2
+                ax.errorbar(
+                    gv.mean(g2_iv), gv.mean(ratio_iv),
+                    xerr=gv.sdev(g2_iv), yerr=gv.sdev(ratio_iv),
+                    fmt='o', ms=2.5, alpha=.6,
+                    color=OP_COLORS[operator],
+                    label=OP_LABELS[operator] if first else None,
+                )
+                first = False
+    ax.set(
+        xlabel=r'$g^2_{\mathrm{GF}}$',
+        ylabel=r'$\beta_{\mathrm{GF}}/g_{\mathrm{GF}}^4$',
+        title=(
+            'Massless-limit infinite-volume data after chiral extrapolation, '
+            rf'$t/a^2\in[{window[0]:g},{window[1]:g}]$'
+        ),
+    )
+    ax.legend(frameon=False)
+    save_figure(
+        fig, window,
+        f'processed_massless_limit_infinite_volume_{FIT_ID}',
+    )
+
+
+for window in FULL_ANALYSIS_WINDOWS:
+    plot_processed_massless_infinite_volume(window)
 
 # Raw massless infinite-volume intercepts before interpolation.
-fig, axes = plt.subplots(1, 2, figsize=(15, 6.2), sharex=True)
 ordered_iv_couplings = tuple(
     sorted(IV_COUPLINGS, key=beta_value, reverse=True)
 )
@@ -1243,45 +1271,6 @@ beta_colors = {
     for index, coupling in enumerate(ordered_iv_couplings)
 }
 operator_markers = {'p': 'o', 'c': 's', 's': '^'}
-
-for coupling in ordered_iv_couplings:
-    color = beta_colors[coupling]
-    for operator in OBSERVABLES:
-        g2_fits = bf.iv_fits[coupling]['g2'][FLOW][operator]
-        beta_fits = bf.iv_fits[coupling]['beta'][FLOW][operator]
-        common_times = sorted(set(g2_fits) & set(beta_fits), key=float)
-        for flow_time in common_times:
-            g2_iv = bf.infinite_volume.model.evaluate(0.0, g2_fits[flow_time])
-            beta_iv = bf.infinite_volume.model.evaluate(
-                0.0, beta_fits[flow_time]
-            )
-            ratio_iv = beta_iv / g2_iv**2
-            style = {
-                'fmt': operator_markers[operator],
-                'ms': 3.8,
-                'capsize': 2,
-                'color': color,
-                'alpha': .58,
-                'linestyle': 'none',
-            }
-            axes[0].errorbar(
-                gv.mean(g2_iv), gv.mean(beta_iv),
-                xerr=gv.sdev(g2_iv), yerr=gv.sdev(beta_iv), **style,
-            )
-            axes[1].errorbar(
-                gv.mean(g2_iv), gv.mean(ratio_iv),
-                xerr=gv.sdev(g2_iv), yerr=gv.sdev(ratio_iv), **style,
-            )
-
-axes[0].set(
-    xlabel=r'$g^2_{\mathrm{GF}}$', ylabel=r'$\beta_{\mathrm{GF}}$',
-    title=r'Raw massless IV data: $\beta_{\mathrm{GF}}$',
-)
-axes[1].set(
-    xlabel=r'$g^2_{\mathrm{GF}}$',
-    ylabel=r'$\beta_{\mathrm{GF}}/g_{\mathrm{GF}}^4$',
-    title=r'Raw massless IV data: $\beta_{\mathrm{GF}}/g_{\mathrm{GF}}^4$',
-)
 plot_xmax = max(G2_GRID[1], G2_T0) + 0.25
 xp_pt = np.linspace(0.001, plot_xmax, 900)
 pt_styles = (
@@ -1289,20 +1278,6 @@ pt_styles = (
     (2, '-.', '2-loop'),
     (3, '-', '3-loop'),
 )
-for loops, linestyle, label in pt_styles:
-    ratio_pt = pt_over_g4(xp_pt, loops)
-    axes[0].plot(
-        xp_pt, xp_pt**2 * ratio_pt,
-        color='gray', ls=linestyle, lw=1.5, zorder=1,
-    )
-    axes[1].plot(
-        xp_pt, ratio_pt,
-        color='gray', ls=linestyle, lw=1.5, zorder=1,
-    )
-for ax in axes:
-    ax.set_xlim(0.0, plot_xmax)
-    ax.axvline(G2_T0, color='black', linestyle='--', lw=1.5, zorder=1)
-axes[0].set_ylim(-13.0, 0.5)
 operator_handles = [
     Line2D(
         [0], [0], marker=operator_markers[operator], linestyle='none',
@@ -1330,24 +1305,79 @@ t0_handle = Line2D(
     [0], [0], color='black', linestyle='--', lw=1.5,
     label=rf'$g^2_{{\mathrm{{GF}}}}(t_0)=\frac{{8}}{{5}}\pi^2={G2_T0:.9f}$',
 )
-axes[0].legend(
-    handles=operator_handles + pt_handles + [t0_handle],
-    frameon=False, fontsize=8.5, ncol=2,
-)
-axes[1].legend(
-    handles=coupling_handles, frameon=False, fontsize=8,
-    ncol=2, title=r'bare coupling',
-)
-fig.suptitle(
-    r'Massless infinite-volume data before interpolation '
-    r'($\beta_b=20$ through the strongest available coupling)',
-)
-fig.tight_layout(rect=(0, 0, 1, .94))
-base = OUTPUT_ROOT / f'massless_infinite_volume_beta_and_ratio_vs_g2_{FIT_ID}'
-add_fit_footer(fig)
-fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
-fig.savefig(base.with_suffix('.pdf'), dpi=300, bbox_inches='tight')
-plt.close(fig)
+
+
+def plot_massless_infinite_volume(window, divide_by_g4=False):
+    """Plot massless IV data using only flow times inside one window."""
+    fig, ax = plt.subplots(figsize=(8.5, 6.5))
+
+    for coupling in ordered_iv_couplings:
+        color = beta_colors[coupling]
+        for operator in OBSERVABLES:
+            g2_fits = bf.iv_fits[coupling]['g2'][FLOW][operator]
+            beta_fits = bf.iv_fits[coupling]['beta'][FLOW][operator]
+            common_times = [
+                flow_time
+                for flow_time in sorted(set(g2_fits) & set(beta_fits), key=float)
+                if window[0] <= float(flow_time) <= window[1]
+            ]
+            for flow_time in common_times:
+                g2_iv = bf.infinite_volume.model.evaluate(
+                    0.0, g2_fits[flow_time]
+                )
+                beta_iv = bf.infinite_volume.model.evaluate(
+                    0.0, beta_fits[flow_time]
+                )
+                value = beta_iv / g2_iv**2 if divide_by_g4 else beta_iv
+                ax.errorbar(
+                    gv.mean(g2_iv), gv.mean(value),
+                    xerr=gv.sdev(g2_iv), yerr=gv.sdev(value),
+                    fmt=operator_markers[operator], ms=3.8, capsize=2,
+                    color=color, alpha=.58, linestyle='none',
+                )
+
+    for loops, linestyle, _ in pt_styles:
+        ratio_pt = pt_over_g4(xp_pt, loops)
+        perturbative_value = ratio_pt if divide_by_g4 else xp_pt**2 * ratio_pt
+        ax.plot(
+            xp_pt, perturbative_value,
+            color='gray', ls=linestyle, lw=1.5, zorder=1,
+        )
+
+    quantity = (
+        r'$\beta_{\mathrm{GF}}/g_{\mathrm{GF}}^4$'
+        if divide_by_g4 else r'$\beta_{\mathrm{GF}}$'
+    )
+    ax.set(
+        xlim=(0.0, plot_xmax),
+        xlabel=r'$g^2_{\mathrm{GF}}$',
+        ylabel=quantity,
+        title=(
+            rf'Massless infinite-volume data: {quantity}, '
+            rf'$t/a^2\in[{window[0]:g},{window[1]:g}]$'
+        ),
+    )
+    if not divide_by_g4:
+        ax.set_ylim(-13.0, 0.5)
+    ax.axvline(G2_T0, color='black', linestyle='--', lw=1.5, zorder=1)
+    ax.legend(
+        handles=(
+            operator_handles + coupling_handles + pt_handles + [t0_handle]
+        ),
+        frameon=False, fontsize=8, ncol=2,
+    )
+    fig.tight_layout()
+    name = (
+        f'massless_infinite_volume_beta_over_g4_vs_g2_{FIT_ID}'
+        if divide_by_g4
+        else f'massless_infinite_volume_beta_vs_g2_{FIT_ID}'
+    )
+    save_figure(fig, window, name)
+
+
+for window in FULL_ANALYSIS_WINDOWS:
+    plot_massless_infinite_volume(window, divide_by_g4=False)
+    plot_massless_infinite_volume(window, divide_by_g4=True)
 
 
 def save_interpolation_diagnostics():
@@ -1456,7 +1486,8 @@ def save_interpolation_diagnostics():
         )
 
 
-save_interpolation_diagnostics()
+if RUN_FULL_ANALYSIS:
+    save_interpolation_diagnostics()
 
 
 # ## Plot 2 — infinite-volume extrapolations for every bare coupling
@@ -2093,7 +2124,7 @@ def load_case(window, mode):
         return gv.load(stream)
 
 mng2, mxg2, dg2 = G2_GRID
-for window in WINDOWS:
+for window in FULL_ANALYSIS_WINDOWS:
     run_continuum_case(window, 'diagonal')
     snapshot_case(window, 'diagonal')
     run_continuum_case(window, 'correlated')
@@ -2101,7 +2132,10 @@ for window in WINDOWS:
     print('saved', window)
     gc.collect()
 
-print(f'saved {2 * len(WINDOWS)} continuum cases')
+if RUN_FULL_ANALYSIS:
+    print(f'saved {2 * len(WINDOWS)} standard continuum cases')
+else:
+    print('skipping standard continuum analysis (--thinning-only)')
 
 
 # ## Plot 3b — beta/g^4 interpolation curves with fitted IV data and coefficients
@@ -2133,7 +2167,7 @@ def interpolation_coefficient_items(fit):
             for label, parameter_name in interpolation_coefficient_specs()]
 
 
-for window in WINDOWS:
+for window in FULL_ANALYSIS_WINDOWS:
     fig, ax = plt.subplots(figsize=(8, 6))
     coefficient_lines = []
 
@@ -2279,7 +2313,7 @@ for window in WINDOWS:
 # In[ ]:
 
 
-for window in WINDOWS:
+for window in FULL_ANALYSIS_WINDOWS:
       fig, (ax1, ax2) = plt.subplots(
           2,
           1,
@@ -2670,7 +2704,7 @@ def plot_continuum_panels(window, mode, divide_by_g4):
 # In[ ]:
 
 
-for window in WINDOWS:
+for window in FULL_ANALYSIS_WINDOWS:
     for mode in ('diagonal', 'correlated'):
         plot_continuum_panels(window, mode, divide_by_g4=False)
 
@@ -2680,7 +2714,7 @@ for window in WINDOWS:
 # In[ ]:
 
 
-for window in WINDOWS:
+for window in FULL_ANALYSIS_WINDOWS:
     for mode in ('diagonal', 'correlated'):
         plot_continuum_panels(window, mode, divide_by_g4=True)
 
@@ -2690,7 +2724,7 @@ for window in WINDOWS:
 # In[ ]:
 
 
-for window in WINDOWS:
+for window in FULL_ANALYSIS_WINDOWS:
       for mode in ('diagonal', 'correlated'):
           case = load_case(window, mode)
           fig, (ax1, ax2) = plt.subplots(
@@ -3002,7 +3036,7 @@ def plot_final_curve(window, mode, divide_by_g4):
 # In[ ]:
 
 
-for window in WINDOWS:
+for window in FULL_ANALYSIS_WINDOWS:
       for mode in ('diagonal', 'correlated'):
           plot_final_curve(
               window,
@@ -3016,7 +3050,7 @@ for window in WINDOWS:
 # In[ ]:
 
 
-for window in WINDOWS:
+for window in FULL_ANALYSIS_WINDOWS:
       for mode in ('diagonal', 'correlated'):
           plot_final_curve(
               window,
@@ -3030,7 +3064,7 @@ for window in WINDOWS:
 # In[ ]:
 
 
-for window in WINDOWS:
+for window in FULL_ANALYSIS_WINDOWS:
       diag = load_case(window, 'diagonal')
       corr = load_case(window, 'correlated')
 
@@ -3655,6 +3689,7 @@ def run_continuum_thinning_study():
         'tau0': float(config.tau0),
         'layout': 'dt_<spacing>/t_<window>/{diagonal,correlated}',
         'reference_analysis_modified': False,
+        'thinning_only': args.thinning_only,
     }
     (THINNING_ROOT / 'run_configuration.json').write_text(
         json.dumps(configuration, indent=2) + '\n'
@@ -3727,7 +3762,7 @@ def ratio_model(x, p):
   return pt_over_g4(x, 3) * correction
 
 
-for window in WINDOWS:
+for window in FULL_ANALYSIS_WINDOWS:
   case = load_case(window, 'correlated')
   fig, ax = plt.subplots(figsize=(8, 6))
 
@@ -3991,7 +4026,7 @@ from betafn.weak_coupling_plots import (
 
 reviewed_weak_results = None
 lambda_parameter_results = None
-if args.reviewed_weak_coupling:
+if RUN_FULL_ANALYSIS and args.reviewed_weak_coupling:
     reviewed_weak_results = run_reviewed_weak_coupling_plots(
         bf=bf,
         flow=FLOW,
@@ -4029,41 +4064,75 @@ if args.reviewed_weak_coupling:
 # In[ ]:
 
 
-rows=[]
-for window in WINDOWS:
-    for mode in ('diagonal','correlated'):
-        case=load_case(window,mode)
-        for operator in OBSERVABLES:
-            q=case['cnt_qof'][FLOW][operator]
-            rows.append({'tmin':window[0],'tmax':window[1],'mode':mode,'operator':operator,
-                         'nfits':len(q),'mean_chi2_dof':np.mean([r['chi2']/r['dof'] for r in q if r['dof']]),
-                         'mean_pvalue':np.mean([r['p-value'] for r in q])})
-summary=pd.DataFrame(rows)
-summary.to_csv(OUTPUT_ROOT/f'{FIT_ID}_scan_summary.csv',index=False)
-print(summary.to_string(index=False))
-
-expected={(window,mode) for window in WINDOWS for mode in ('diagonal','correlated')}
-present={(window,mode) for window in WINDOWS for mode in ('diagonal','correlated')
-         if (case_dir(window,mode)/'continuum_case.gvar').is_file()}
-assert present==expected, f'missing cases: {expected-present}'
 assert config.binsize==args.binsize and config.correction==CORRECTION
 assert config.combine=={'s': {'p':5/3,'s':-2/3}}
-print(f'{FIT_ID} validation complete:',len(present),'continuum cases')
-(OUTPUT_ROOT / 'RUN_COMPLETE.json').write_text(json.dumps({
-    'model': FIT_ID,
-    'model_tag': MODEL_TAG,
-    'continuum_cases': len(present),
-    'reviewed_weak_coupling': args.reviewed_weak_coupling,
-    'lambda_parameter_outputs': lambda_parameter_results is not None,
-    'continuum_thinning': args.continuum_thinning,
-    'thinning_spacings': (
-        list(THINNING_FLOW_SPACINGS) if args.continuum_thinning else []
-    ),
-    'thinning_summary_rows': (
-        int(len(thinning_summary)) if thinning_summary is not None else 0
-    ),
-    'elapsed_seconds': round(time_module.time() - RUN_STARTED, 3),
-}, indent=2) + '\n')
+if RUN_FULL_ANALYSIS:
+    rows=[]
+    for window in WINDOWS:
+        for mode in ('diagonal','correlated'):
+            case=load_case(window,mode)
+            for operator in OBSERVABLES:
+                q=case['cnt_qof'][FLOW][operator]
+                rows.append({'tmin':window[0],'tmax':window[1],'mode':mode,'operator':operator,
+                             'nfits':len(q),'mean_chi2_dof':np.mean([r['chi2']/r['dof'] for r in q if r['dof']]),
+                             'mean_pvalue':np.mean([r['p-value'] for r in q])})
+    summary=pd.DataFrame(rows)
+    summary.to_csv(OUTPUT_ROOT/f'{FIT_ID}_scan_summary.csv',index=False)
+    print(summary.to_string(index=False))
+
+    expected={(window,mode) for window in WINDOWS for mode in ('diagonal','correlated')}
+    present={(window,mode) for window in WINDOWS for mode in ('diagonal','correlated')
+             if (case_dir(window,mode)/'continuum_case.gvar').is_file()}
+    assert present==expected, f'missing cases: {expected-present}'
+    print(f'{FIT_ID} validation complete:',len(present),'continuum cases')
+    completion_path = OUTPUT_ROOT / 'RUN_COMPLETE.json'
+    completion_payload = {
+        'model': FIT_ID,
+        'model_tag': MODEL_TAG,
+        'continuum_cases': len(present),
+        'reviewed_weak_coupling': args.reviewed_weak_coupling,
+        'lambda_parameter_outputs': lambda_parameter_results is not None,
+        'continuum_thinning': args.continuum_thinning,
+        'thinning_only': False,
+        'thinning_spacings': (
+            list(THINNING_FLOW_SPACINGS) if args.continuum_thinning else []
+        ),
+        'thinning_summary_rows': (
+            int(len(thinning_summary)) if thinning_summary is not None else 0
+        ),
+        'elapsed_seconds': round(time_module.time() - RUN_STARTED, 3),
+    }
+else:
+    if thinning_summary is None:
+        raise RuntimeError('thinning-only run did not produce a thinning summary')
+    expected_rows = (
+        len(WINDOWS) * len(THINNING_FLOW_SPACINGS)
+        * len(THINNING_CONTINUUM_CASES)
+    )
+    if len(thinning_summary) != expected_rows:
+        raise RuntimeError(
+            f'thinning summary has {len(thinning_summary)} rows; '
+            f'expected {expected_rows}'
+        )
+    print(
+        f'{FIT_ID} thinning-only validation complete:',
+        len(thinning_summary), 'summary rows',
+    )
+    completion_path = OUTPUT_ROOT / 'RUN_THINNING_COMPLETE.json'
+    completion_payload = {
+        'model': FIT_ID,
+        'model_tag': MODEL_TAG,
+        'continuum_cases': 0,
+        'reviewed_weak_coupling': False,
+        'lambda_parameter_outputs': False,
+        'continuum_thinning': True,
+        'thinning_only': True,
+        'thinning_spacings': list(THINNING_FLOW_SPACINGS),
+        'thinning_summary_rows': int(len(thinning_summary)),
+        'elapsed_seconds': round(time_module.time() - RUN_STARTED, 3),
+    }
+
+completion_path.write_text(json.dumps(completion_payload, indent=2) + '\n')
 
 
 # In[ ]:

@@ -14,8 +14,16 @@ set -euo pipefail
 : "${BETAFN_OUTPUT_BASE:?Set BETAFN_OUTPUT_BASE to an HPCC output directory.}"
 : "${BETAFN_VENV:?Set BETAFN_VENV to the Python virtual-environment directory.}"
 : "${BETAFN_CONTINUUM_THINNING:=0}"
+: "${BETAFN_THINNING_ONLY:=0}"
 
-if [[ "${BETAFN_CONTINUUM_THINNING}" == "1" ]]; then
+analysis_mode_args=()
+if [[ "${BETAFN_THINNING_ONLY}" == "1" ]]; then
+  thinning_arg="--continuum-thinning"
+  analysis_mode_args+=(--thinning-only)
+elif [[ "${BETAFN_THINNING_ONLY}" != "0" ]]; then
+  echo "BETAFN_THINNING_ONLY must be 0 or 1; got ${BETAFN_THINNING_ONLY}" >&2
+  exit 2
+elif [[ "${BETAFN_CONTINUUM_THINNING}" == "1" ]]; then
   thinning_arg="--continuum-thinning"
 elif [[ "${BETAFN_CONTINUUM_THINNING}" == "0" ]]; then
   thinning_arg="--no-continuum-thinning"
@@ -77,4 +85,5 @@ srun python -u scripts/run_nf4_analysis.py \
   --binsize 15 \
   --use-gamma-method \
   --reviewed-weak-coupling \
-  "${thinning_arg}"
+  "${thinning_arg}" \
+  "${analysis_mode_args[@]}"
