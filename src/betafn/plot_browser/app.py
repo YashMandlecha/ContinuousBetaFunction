@@ -14,6 +14,62 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent
 SEARCH_ROOTS = (ROOT, ROOT.parent)
 DATA_ROOT = Path("/Users/yaman/Contbetafn/data/New Four")
+ANALYSIS_ROOT = Path("/Volumes/T7/ContinuousBetaFunction/hpcc_outputs")
+ANALYSIS_FIT_NAMES = tuple(f"fit{number}" for number in range(1, 13))
+ANALYSIS_ORDER_DIRECTORIES = {
+    "fit1": {
+        "order_3_nopriors": 3,
+        "order_4_nopriors": 4,
+        "order_5_nopriors": 5,
+    },
+    "fit2": {
+        "order_3_nopriors": 3,
+        "order_4_nopriors": 4,
+        "order_5_nopriors": 5,
+    },
+    "fit3": {
+        "order_3_nopriors": 3,
+        "order_4_nopriors": 4,
+        "order_5_nopriors": 5,
+    },
+    "fit5": {
+        "pt_fixed_additive_u3_nopriors": 1,
+        "pt_fixed_additive_u3_u4_nopriors": 2,
+    },
+    "fit6": {
+        "two_loop_free_additive_u3_nopriors": 1,
+        "two_loop_free_additive_u3_u4_nopriors": 2,
+        "two_loop_free_additive_u3_u4_u5_nopriors": 3,
+    },
+    "fit7": {
+        "three_loop_free_additive_u3_nopriors": 1,
+        "three_loop_free_additive_u3_u4_nopriors": 2,
+    },
+    "fit8": {
+        "order_3_c1_fixed_0": 3,
+        "order_4_c1_fixed_0": 4,
+    },
+    "fit9": {
+        "order_3_c2_fixed_0": 3,
+        "order_4_c2_fixed_0": 4,
+        "order_5_c2_fixed_0": 5,
+    },
+    "fit10": {
+        "order_3_c1_c2_fixed_0_free_c0": 3,
+        "order_4_c1_c2_fixed_0_free_c0": 4,
+        "order_5_c1_c2_fixed_0_free_c0": 5,
+    },
+    "fit11": {
+        "order_3_additive_beta_constant_nopriors": 3,
+        "order_4_additive_beta_constant_nopriors": 4,
+        "order_5_additive_beta_constant_nopriors": 5,
+    },
+    "fit12": {
+        "order_3_rescaled_a0_standard_continuum_nopriors": 3,
+        "order_4_rescaled_a0_standard_continuum_nopriors": 4,
+        "order_5_rescaled_a0_standard_continuum_nopriors": 5,
+    },
+}
 
 st.set_page_config(page_title="Gradient-flow beta-function plot browser", layout="wide")
 st.markdown(
@@ -24,6 +80,15 @@ st.markdown(
     .subtitle { font-size: 1.05rem; color: #888; margin-top: -0.5rem;
                 margin-bottom: 1.2rem; }
     .small-muted { color: #666; font-size: 0.92rem; }
+    code, [data-testid="stMarkdownContainer"] code {
+        background: transparent !important;
+        color: inherit !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        padding: 0 !important;
+        font-family: inherit !important;
+        font-size: inherit !important;
+    }
     iframe { border: 1px solid #ddd; border-radius: 8px; }
     .ensemble-table-wrap { display: flex; justify-content: center; }
     table.ensemble-table { width: auto; border-collapse: collapse; font-size: 0.95rem; }
@@ -42,69 +107,66 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown(
-    r"Define $x=g_{\rm GF}^2$, $u=x/(4\pi)$, and "
-    r"$R(x)=\beta_{\rm GF}(x)/x^2$. The models below differ only in the "
+    r"Define $x=g_{\rm GF}^2$ and $u=x/(4\pi)$. Plots of "
+    r"$\beta_{\rm GF}/g_{\rm GF}^4$ show $\beta_{\rm GF}(x)/x^2$. "
+    "The models below differ only in the "
     "interpolation ansatz; data processing, infinite-volume extrapolation, "
     "continuum analysis, and diagnostic procedures are otherwise shared."
 )
 
 with st.expander("Interpolation models and priors", expanded=True):
-    (fit4_tab, fit5_tab, fit6_tab, fit7_tab, fit8_tab, fit9_tab,
+    (fit1_tab, fit2_tab, fit3_tab, fit4_tab, fit5_tab, fit6_tab, fit7_tab, fit8_tab, fit9_tab,
      fit10_tab, fit11_tab, fit12_tab) = st.tabs(
         (
-            "fit4", "fit5", "fit6", "fit7", "fit8", "fit9", "fit10",
-            "fit11", "fit12",
+            "fit1", "fit2", "fit3", "fit4", "fit5", "fit6", "fit7",
+            "fit8", "fit9", "fit10", "fit11", "fit12",
         )
     )
+    with fit1_tab:
+        st.markdown("**Unconstrained polynomial in the gradient-flow coupling**")
+        st.latex(
+            r"\beta(x)=\sum_{n=0}^{N}p_nx^n,"
+            r"\qquad N\in\{3,4,5\}"
+        )
+        st.markdown("All polynomial coefficients are free and have no priors.")
+    with fit2_tab:
+        st.markdown("**Free constant with running terms beginning at $x^2$**")
+        st.latex(
+            r"\beta(x)=p_0+x^2\sum_{n=1}^{N}p_nx^{n-1},"
+            r"\qquad N\in\{3,4,5\}"
+        )
+        st.markdown("All fitted coefficients are free and have no priors.")
+    with fit3_tab:
+        st.markdown("**Origin-constrained polynomial with running terms beginning at $x^2$**")
+        st.latex(
+            r"\beta(x)=x^2\sum_{n=1}^{N}p_nx^{n-1},"
+            r"\qquad p_0=0,\quad N\in\{3,4,5\}"
+        )
+        st.markdown(r"The coefficients $p_1,\ldots,p_N$ are free and have no priors.")
     with fit4_tab:
         st.markdown("**Multiplicative correction to fixed three-loop perturbation theory**")
         st.latex(
             r"\beta(x)=\beta_{\rm PT}^{(3)}(x)"
-            r"\left[1+\sum_{n=1}^{N}c_nu^n\right]"
-        )
-        st.markdown(
-            "Runs use correction orders $N=3,4,5,6$. For `fit4_width1000`, "
-            "each coefficient has the independent prior "
-            r"$c_n\sim\mathcal N(0,1000^2)$ and `xerrors=True`. For "
-            "`fit4_nopriors`, all $c_n$ are unconstrained fit parameters and "
-            "`xerrors=False`. The perturbative prefactor is fixed exactly."
+            r"\left[1+\sum_{n=1}^{N}c_nu^n\right],"
+            r"\qquad N\in\{3,4,5,6\}"
         )
     with fit5_tab:
         st.markdown("**All three known perturbative coefficients fixed**")
         st.latex(
-            r"R(x)=R_{\rm PT}^{(3)}(x)+"
+            r"\beta(x)=\beta_{\rm PT}^{(3)}(x)+x^2"
             r"\sum_{k=3}^{2+N}d_ku^k,\qquad N\in\{1,2\}"
-        )
-        st.markdown(
-            "Order 1 fits $d_3$; order 2 fits $d_3,d_4$. Every fitted "
-            "coefficient is unconstrained: there are no coefficient priors, "
-            "and both variants use `xerrors=False`."
         )
     with fit6_tab:
         st.markdown("**One- and three-loop coefficients fixed; two-loop coefficient free**")
         st.latex(
-            r"R(x)=A_0+b_1u+A_2u^2+"
-            r"\sum_{k=3}^{2+N}d_ku^k,\qquad N\in\{1,2\}"
-        )
-        st.markdown(
-            "$A_0$ and $A_2$ are fixed at their perturbative values. The "
-            "normalized two-loop coefficient $b_1$ and each included $d_k$ "
-            "are unconstrained. Order 1 fits $b_1,d_3$; order 2 fits "
-            "$b_1,d_3,d_4$. There are no coefficient priors and "
-            "`xerrors=False`."
+            r"\beta(x)=x^2\left[A_0+b_1u+A_2u^2+"
+            r"\sum_{k=3}^{2+N}d_ku^k\right],\qquad N\in\{1,2,3\}"
         )
     with fit7_tab:
         st.markdown("**One- and two-loop coefficients fixed; three-loop coefficient free**")
         st.latex(
-            r"R(x)=A_0+A_1u+b_2u^2+"
-            r"\sum_{k=3}^{2+N}d_ku^k,\qquad N\in\{1,2\}"
-        )
-        st.markdown(
-            "$A_0$ and $A_1$ are fixed at their perturbative values. The "
-            "normalized three-loop coefficient $b_2$ and each included $d_k$ "
-            "are unconstrained. Order 1 fits $b_2,d_3$; order 2 fits "
-            "$b_2,d_3,d_4$. There are no coefficient priors and "
-            "`xerrors=False`."
+            r"\beta(x)=x^2\left[A_0+A_1u+b_2u^2+"
+            r"\sum_{k=3}^{2+N}d_ku^k\right],\qquad N\in\{1,2\}"
         )
     with fit8_tab:
         st.markdown("**Multiplicative fit with $c_1$ fixed to zero**")
@@ -112,34 +174,19 @@ with st.expander("Interpolation models and priors", expanded=True):
             r"\beta(x)=\beta_{\rm PT}^{(3)}(x)"
             r"\left[1+\sum_{n=2}^{N}c_nu^n\right],\qquad c_1=0,\quad N\in\{3,4\}"
         )
-        st.markdown(
-            "Order 3 fits $c_2,c_3$; order 4 fits $c_2,c_3,c_4$. "
-            "All fitted coefficients are unconstrained: there are no priors "
-            "and `xerrors=False`."
-        )
     with fit9_tab:
         st.markdown("**Multiplicative fit with $c_2$ fixed to zero**")
         st.latex(
             r"\beta(x)=\beta_{\rm PT}^{(3)}(x)"
             r"\left[1+c_1u+\sum_{n=3}^{N}c_nu^n\right],"
-            r"\qquad c_2=0,\quad N\in\{3,4\}"
-        )
-        st.markdown(
-            "Order 3 fits $c_1,c_3$; order 4 fits $c_1,c_3,c_4$. "
-            "All fitted coefficients are unconstrained: there are no priors "
-            "and `xerrors=False`."
+            r"\qquad c_2=0,\quad N\in\{3,4,5\}"
         )
     with fit10_tab:
         st.markdown("**Free multiplicative intercept with $c_1=c_2=0$**")
         st.latex(
             r"\beta(x)=\beta_{\rm PT}^{(3)}(x)"
             r"\left[c_0+\sum_{n=3}^{N}c_nu^n\right],"
-            r"\qquad c_1=c_2=0,\quad N\in\{3,4\}"
-        )
-        st.markdown(
-            "Order 3 fits $c_0,c_3$; order 4 fits $c_0,c_3,c_4$. "
-            "All fitted coefficients are unconstrained: there are no priors "
-            "and `xerrors=False`."
+            r"\qquad c_1=c_2=0,\quad N\in\{3,4,5\}"
         )
     with fit11_tab:
         st.markdown("**Free additive constant in beta plus the Fit 4 correction**")
@@ -148,19 +195,9 @@ with st.expander("Interpolation models and priors", expanded=True):
             r"\left[1+\sum_{n=1}^{N}c_nu^n\right],"
             r"\qquad N\in\{3,4,5\}"
         )
-        st.latex(
-            r"R(x)=\frac{a_0}{x^2}+R_{\rm PT}^{(3)}(x)"
-            r"\left[1+\sum_{n=1}^{N}c_nu^n\right]"
-        )
         st.markdown(
-            "The additive beta-function constant $a_0$ is fitted independently "
-            "for each operator and finite flow time. In this initial variant, "
-            "$a_0$ and all included $c_n$ are unconstrained: there are no "
-            "coefficient priors and `xerrors=False`. The $a_0/x^2$ behavior "
-            "makes this a discretization diagnostic rather than a valid "
-            "standalone weak-coupling continuum ansatz. Consequently, the "
-            "finite-spacing extended-to-zero diagnostics are intentionally "
-            "not generated for Fit 11."
+            "$a_0$ is a free additive constant at each operator and flow time; "
+            "$a_0$ and the $c_n$ have no priors."
         )
     with fit12_tab:
         st.markdown(
@@ -172,67 +209,49 @@ with st.expander("Interpolation models and priors", expanded=True):
             r"\qquad z_j=(a^2/t)_j,\quad N\in\{3,4,5\}"
         )
         st.markdown(
-            "Within interpolation $j$, $z_j$ is a known constant and "
-            "$A_{0,j}$ is free, so only the product "
-            "$a_{0,j}=z_jA_{0,j}$ is identifiable. This is exactly a change "
-            "of parameter coordinates relative to Fit 11: it must not change "
-            "the fitted interpolation curve. The evaluated curves are passed "
-            "unchanged to the same per-$g^2$ linear continuum extrapolation "
-            "used by Fit 11. Parameters are independent between flow times; "
-            "there is no global shared-$A_0$ or shared-$c_n$ continuum fit. "
-            "All coefficients are unconstrained, with no priors and "
-            "`xerrors=False`."
+            "$z_j=(a^2/t)_j$ is known and $a_{0,j}=z_jA_{0,j}$; "
+            "$A_{0,j}$ and the $c_{n,j}$ have no priors."
         )
-
-    st.info(
-        "**Fit 11 versus Fit 12:** both use the same multiplicative Fit 4 "
-        "correction and the same standard continuum extrapolation. Fit 11 "
-        "fits the finite-time constant directly as $a_{0,j}$; Fit 12 writes "
-        "the same constant as $z_jA_{0,j}$. Because $z_j$ is fixed within "
-        "each interpolation, the two fitted curves and continuum results "
-        "should agree up to numerical precision."
-    )
 
     st.markdown("**Fixed $N_f=4$, SU(3), gradient-flow perturbative reference**")
     st.latex(
-        r"R_{\rm PT}^{(3)}(x)="
-        r"-0.0527714498137-0.00205854331669x+0.000919267536173x^2"
-    )
-    st.caption(
-        "In the normalized-u notation, A₀ = −0.0527714498137, "
-        "A₁ = −0.0258684182433, and A₂ = 0.145164910733. "
-        "The symbols b₁ and b₂ above denote fitted normalized-u coefficients, "
-        "not additional fixed perturbative constants. Fits 5–12 use no "
-        "coefficient priors, so their free coefficients may take either sign."
+        r"\beta_{\rm PT}^{(3)}(x)=x^2\left["
+        r"-0.0527714498137-0.00205854331669x"
+        r"+0.000919267536173x^2\right]"
     )
     st.markdown(
-        "**Common analysis settings:** continuum points use the 41-value grid "
-        r"$x=0.9,1.0,\ldots,4.9$; all 15 integer flow-time windows from "
-        "$[3,4]$ through $[7,8]$ are analyzed with both diagonal and "
-        "kernel-correlated continuum fits. Each run also performs the five "
-        r"flow-time thinning tests $\Delta(t/a^2)=0.05,0.10,0.20$."
-    )
-    st.markdown(
-        "| Variant | Output model tag | Fitted parameters |\n"
-        "|---|---|---|\n"
-        "| fit5 order 1 | `pt_fixed_additive_u3_nopriors` | $d_3$ |\n"
-        "| fit5 order 2 | `pt_fixed_additive_u3_u4_nopriors` | $d_3,d_4$ |\n"
-        "| fit6 order 1 | `two_loop_free_additive_u3_nopriors` | $b_1,d_3$ |\n"
-        "| fit6 order 2 | `two_loop_free_additive_u3_u4_nopriors` | $b_1,d_3,d_4$ |\n"
-        "| fit7 order 1 | `three_loop_free_additive_u3_nopriors` | $b_2,d_3$ |\n"
-        "| fit7 order 2 | `three_loop_free_additive_u3_u4_nopriors` | $b_2,d_3,d_4$ |\n"
-        "| fit8 order 3 | `order_3_c1_fixed_0` | $c_2,c_3$ |\n"
-        "| fit8 order 4 | `order_4_c1_fixed_0` | $c_2,c_3,c_4$ |\n"
-        "| fit9 order 3 | `order_3_c2_fixed_0` | $c_1,c_3$ |\n"
-        "| fit9 order 4 | `order_4_c2_fixed_0` | $c_1,c_3,c_4$ |\n"
-        "| fit10 order 3 | `order_3_c1_c2_fixed_0_free_c0` | $c_0,c_3$ |\n"
-        "| fit10 order 4 | `order_4_c1_c2_fixed_0_free_c0` | $c_0,c_3,c_4$ |\n"
-        "| fit11 order 3 | `order_3_additive_beta_constant_nopriors` | $a_0,c_1,c_2,c_3$ |\n"
-        "| fit11 order 4 | `order_4_additive_beta_constant_nopriors` | $a_0,c_1,c_2,c_3,c_4$ |\n"
-        "| fit11 order 5 | `order_5_additive_beta_constant_nopriors` | $a_0,c_1,c_2,c_3,c_4,c_5$ |\n"
-        "| fit12 order 3 | `order_3_rescaled_a0_standard_continuum_nopriors` | $A_{0,j},c_1,c_2,c_3$ |\n"
-        "| fit12 order 4 | `order_4_rescaled_a0_standard_continuum_nopriors` | $A_{0,j},c_1,c_2,c_3,c_4$ |\n"
-        "| fit12 order 5 | `order_5_rescaled_a0_standard_continuum_nopriors` | $A_{0,j},c_1,c_2,c_3,c_4,c_5$ |"
+        "| Variant | Fitted parameters |\n"
+        "|---|---|\n"
+        "| fit1 order 3 | $p_0,p_1,p_2,p_3$ |\n"
+        "| fit1 order 4 | $p_0,p_1,p_2,p_3,p_4$ |\n"
+        "| fit1 order 5 | $p_0,p_1,p_2,p_3,p_4,p_5$ |\n"
+        "| fit2 order 3 | $p_0,p_1,p_2,p_3$ |\n"
+        "| fit2 order 4 | $p_0,p_1,p_2,p_3,p_4$ |\n"
+        "| fit2 order 5 | $p_0,p_1,p_2,p_3,p_4,p_5$ |\n"
+        "| fit3 order 3 | $p_1,p_2,p_3$ |\n"
+        "| fit3 order 4 | $p_1,p_2,p_3,p_4$ |\n"
+        "| fit3 order 5 | $p_1,p_2,p_3,p_4,p_5$ |\n"
+        "| fit5 order 1 | $d_3$ |\n"
+        "| fit5 order 2 | $d_3,d_4$ |\n"
+        "| fit6 order 1 | $b_1,d_3$ |\n"
+        "| fit6 order 2 | $b_1,d_3,d_4$ |\n"
+        "| fit6 order 3 | $b_1,d_3,d_4,d_5$ |\n"
+        "| fit7 order 1 | $b_2,d_3$ |\n"
+        "| fit7 order 2 | $b_2,d_3,d_4$ |\n"
+        "| fit8 order 3 | $c_2,c_3$ |\n"
+        "| fit8 order 4 | $c_2,c_3,c_4$ |\n"
+        "| fit9 order 3 | $c_1,c_3$ |\n"
+        "| fit9 order 4 | $c_1,c_3,c_4$ |\n"
+        "| fit9 order 5 | $c_1,c_3,c_4,c_5$ |\n"
+        "| fit10 order 3 | $c_0,c_3$ |\n"
+        "| fit10 order 4 | $c_0,c_3,c_4$ |\n"
+        "| fit10 order 5 | $c_0,c_3,c_4,c_5$ |\n"
+        "| fit11 order 3 | $a_0,c_1,c_2,c_3$ |\n"
+        "| fit11 order 4 | $a_0,c_1,c_2,c_3,c_4$ |\n"
+        "| fit11 order 5 | $a_0,c_1,c_2,c_3,c_4,c_5$ |\n"
+        "| fit12 order 3 | $A_{0,j},c_1,c_2,c_3$ |\n"
+        "| fit12 order 4 | $A_{0,j},c_1,c_2,c_3,c_4$ |\n"
+        "| fit12 order 5 | $A_{0,j},c_1,c_2,c_3,c_4,c_5$ |"
     )
 
 
@@ -250,12 +269,20 @@ def rerun_app() -> None:
 
 def embed_pdf(path: Path, height: int = 780) -> None:
     pdf_bytes = path.read_bytes()
-    encoded = base64.b64encode(pdf_bytes).decode("utf-8")
-    st.markdown(
-        f'<iframe src="data:application/pdf;base64,{encoded}" width="100%" '
-        f'height="{height}" type="application/pdf"></iframe>',
-        unsafe_allow_html=True,
-    )
+    bitmap = path.with_suffix(".png")
+    if len(pdf_bytes) <= 4 * 1024 * 1024:
+        encoded = base64.b64encode(pdf_bytes).decode("utf-8")
+        st.markdown(
+            f'<iframe src="data:application/pdf;base64,{encoded}" width="100%" '
+            f'height="{height}" type="application/pdf"></iframe>',
+            unsafe_allow_html=True,
+        )
+    elif bitmap.is_file():
+        # Large PDFs can exceed browser data-URL limits. Display the matching
+        # bitmap reliably and retain the vector PDF download below.
+        st.image(str(bitmap), width="stretch")
+    else:
+        st.info("Use the download button below to open this PDF.")
     st.download_button(
         "Download selected file", data=pdf_bytes, file_name=path.name,
         mime="application/pdf", key=make_widget_key("download_pdf", path),
@@ -290,16 +317,23 @@ def configuration_sort_key(name: str) -> tuple[int, float]:
 
 def configuration_label(path: Path) -> str:
     if path.name == "fit4_nopriors":
-        return "No coefficient priors — xerrors=False"
+        return "No coefficient priors"
     match = re.fullmatch(r"fit4_width(.+)", path.name)
     if match:
         return f"Prior width {match.group(1).replace('p', '.')} — xerrors=True"
     return path.name
 
 
-def order_sort_key(path: Path) -> int:
-    match = re.fullmatch(r"order_(\d+)", path.name)
+def analysis_order_number(path: Path) -> int:
+    for directory_orders in ANALYSIS_ORDER_DIRECTORIES.values():
+        if path.name in directory_orders:
+            return directory_orders[path.name]
+    match = re.match(r"order_(\d+)(?:_|$)", path.name)
     return int(match.group(1)) if match else 10**9
+
+
+def order_sort_key(path: Path) -> int:
+    return analysis_order_number(path)
 
 
 def window_sort_key(path: Path) -> tuple[float, float]:
@@ -310,7 +344,8 @@ def window_sort_key(path: Path) -> tuple[float, float]:
 
 
 def pretty_order(path: Path) -> str:
-    return f"Order {path.name.removeprefix('order_')}"
+    order = analysis_order_number(path)
+    return f"Order {order}" if order < 10**9 else path.name
 
 
 def pretty_window(path: Path) -> str:
@@ -328,6 +363,106 @@ def pretty_mode(mode: str) -> str:
         "correlated": "Continuum — correlated covariance",
         "correlated_diagnostic": "Correlated weak-coupling diagnostics",
     }.get(mode, mode)
+
+
+def fit_family_label(path: Path) -> str:
+    match = re.fullmatch(r"fit(\d+)", path.name)
+    return f"Fit {match.group(1)}" if match else path.name
+
+
+def thinning_sort_key(path: Path) -> float:
+    match = re.fullmatch(r"dt_(\d+(?:p\d+)?)", path.name)
+    if match is None:
+        return float("inf")
+    return float(match.group(1).replace("p", "."))
+
+
+def sampling_label(path: Path, order: Path) -> str:
+    if path == order:
+        return "Unthinned (standard continuum analysis)"
+    spacing = thinning_sort_key(path)
+    if spacing != float("inf"):
+        return f"Thinned: Δ(t/a²) = {spacing:g}"
+    return path.name
+
+
+@st.cache_data(show_spinner=False)
+def discover_analysis_fits() -> list[str]:
+    """Find completed analysis families from Fit 1 through Fit 12 on T7."""
+    if not ANALYSIS_ROOT.is_dir():
+        return []
+    fits = []
+    for name in ANALYSIS_FIT_NAMES:
+        path = ANALYSIS_ROOT / name
+        if path.is_dir():
+            fits.append(str(path))
+        elif name == "fit4" and any(
+                candidate.is_dir()
+                for candidate in ANALYSIS_ROOT.glob("fit4_*")
+        ):
+            # Fit 4 configurations live in fit4_nopriors / fit4_width*, so
+            # keep a virtual Fit 4 family even when no literal fit4 exists.
+            fits.append(str(path))
+    return fits
+
+
+@st.cache_data(show_spinner=False)
+def discover_fit4_analysis_configurations() -> list[str]:
+    if not ANALYSIS_ROOT.is_dir():
+        return []
+    configurations = [
+        path for path in ANALYSIS_ROOT.glob("fit4_*")
+        if path.is_dir()
+        and (path.name == "fit4_nopriors" or path.name.startswith("fit4_width"))
+    ]
+    return [str(path) for path in sorted(
+        configurations, key=lambda path: configuration_sort_key(path.name)
+    )]
+
+
+def list_analysis_orders(result_root: Path, fit_name: str) -> list[Path]:
+    if not result_root.is_dir():
+        return []
+    directory_orders = ANALYSIS_ORDER_DIRECTORIES.get(fit_name)
+    if directory_orders is None:
+        candidates = [
+            path for path in result_root.iterdir()
+            if path.is_dir() and re.fullmatch(r"order_\d+", path.name)
+        ]
+    else:
+        candidates = [result_root / name for name in directory_orders
+                      if (result_root / name).is_dir()]
+    completed = [path for path in candidates
+                 if (path / "RUN_COMPLETE.json").is_file()]
+    return sorted(completed, key=order_sort_key)
+
+
+def list_sampling_directories(order: Path) -> list[Path]:
+    thinning_root = order / "continuum_thinning_scan"
+    thinned = []
+    if thinning_root.is_dir():
+        thinned = sorted(
+            (path for path in thinning_root.iterdir()
+             if path.is_dir() and re.fullmatch(r"dt_.+", path.name)),
+            key=thinning_sort_key,
+        )
+    return [order, *thinned]
+
+
+def result_plot(folder: Path, stem: str, fit_tag: str) -> Path | None:
+    """Return a vector result when available, with a bitmap fallback."""
+    tagged_stems = [f"{stem}_{fit_tag}"]
+    if stem.endswith("_with_data"):
+        tagged_stems.insert(
+            0, f"{stem.removesuffix('_with_data')}_{fit_tag}_with_data"
+        )
+    tagged_stems.append(stem)
+    for suffix in (".pdf", ".png"):
+        for candidate_stem in tagged_stems:
+            candidate = folder / f"{candidate_stem}{suffix}"
+            if candidate.is_file():
+                return candidate
+    return None
 
 
 @st.cache_data(show_spinner=False)
@@ -383,7 +518,9 @@ def classify_plot(filename: str) -> str:
         "interpolation_quality_fit4": "interpolation quality",
         "continuum_quality_fit4": "continuum quality",
         "diagonal_vs_correlated_fit4": "diagonal vs correlated comparison",
-        "figure11_integral_matching_fit4": "Figure 11 integral matching",
+        "figure11_integral_matching_fit4": (
+            "Integral matching across operators with fitted b_p"
+        ),
         "weak_coupling_to_zero_fit4": "weak-coupling extrapolation",
         "extended_intermediate_to_zero_fit4": "extended intermediate interpolations",
         "extended_interpolation_continuum_to_zero_fit4": "continuum limit of extended interpolations",
@@ -451,30 +588,124 @@ def render_analysis_tab() -> None:
     selection_col, main_col = st.columns([0.95, 3.05], gap="large")
     with selection_col:
         st.markdown("### Analysis selection")
-        st.markdown(f'<div class="small-muted">Root:<br><code>{ROOT}</code></div>',
-                    unsafe_allow_html=True)
-        selected = fit4_selection("analysis")
-        if selected is None:
-            return
-        configuration, order, window = selected
-        if st.button("Rescan", width="stretch", key="analysis_rescan"):
-            discover_configurations.clear()
-            scan_plot_folder.clear()
+        if st.button("Rescan results", width="stretch", key="analysis_rescan"):
+            discover_analysis_fits.clear()
+            discover_fit4_analysis_configurations.clear()
             rerun_app()
-
-    requested = (
-        (window, "interpolation_beta_over_g4_fit4_with_data", "Interpolation fit with data and coefficients"),
-        (window, "interpolation_quality_fit4", "Interpolation fit quality"),
-        (window / "correlated", "continuum_beta_over_g4_vs_g2_fit4", r"Correlated continuum $\beta_{\rm GF}/g_{\rm GF}^4$ versus $g_{\rm GF}^2$"),
-        (window / "correlated", "continuum_a2_over_t_beta_fit4", r"Correlated $\beta_{\rm GF}$ versus $a^2/t$"),
-        (window / "correlated", "continuum_a2_over_t_beta_over_g4_fit4", r"Correlated $\beta_{\rm GF}/g_{\rm GF}^4$ versus $a^2/t$"),
-        (window / "correlated", "figure11_integral_matching_fit4", "Figure 11 integral matching"),
-        (window / "correlated_diagnostic", "extended_intermediate_to_zero_fit4", "Extended intermediate interpolations to zero"),
-        (window / "correlated_diagnostic", "extended_interpolation_continuum_to_zero_fit4", "Continuum limit of extended interpolations"),
-    )
+        fits = [Path(value) for value in discover_analysis_fits()]
+        if not fits:
+            st.error(
+                "No Fit 1–12 analysis folders were found. "
+                "Connect the T7 drive and rescan."
+            )
+            return
+        fit_directory = st.selectbox(
+            "Fit family", fits, format_func=fit_family_label,
+            key="analysis_fit_family",
+        )
+        result_root = fit_directory
+        fit4_configuration = None
+        if fit_directory.name == "fit4":
+            configurations = [
+                Path(value) for value in discover_fit4_analysis_configurations()
+            ]
+            if not configurations:
+                st.warning("No completed Fit 4 configurations were found.")
+                return
+            fit4_configuration = st.selectbox(
+                "Fit 4 prior configuration", configurations,
+                format_func=configuration_label,
+                key="analysis_fit4_configuration",
+            )
+            result_root = fit4_configuration
+        orders = list_analysis_orders(result_root, fit_directory.name)
+        if not orders:
+            st.warning(f"No completed order folders were found in `{result_root}`.")
+            return
+        order = st.selectbox(
+            "Interpolation order", orders, format_func=pretty_order,
+            key="analysis_order",
+        )
+        sampling_directories = list_sampling_directories(order)
+        sampling = st.selectbox(
+            "Continuum flow-time sampling", sampling_directories,
+            format_func=lambda path: sampling_label(path, order),
+            key="analysis_sampling",
+        )
+        windows = list_windows(sampling)
+        if not windows:
+            st.warning(f"No flow-time ranges were found in `{sampling}`.")
+            return
+        window = st.selectbox(
+            "Flow-time range", windows, format_func=pretty_window,
+            key="analysis_window",
+        )
+        covariance_modes = [mode for mode in ("diagonal", "correlated")
+                            if (window / mode).is_dir()]
+        if not covariance_modes:
+            st.warning(f"No continuum covariance folders were found in `{window}`.")
+            return
+        default_mode = (covariance_modes.index("correlated")
+                        if "correlated" in covariance_modes else 0)
+        covariance_mode = st.selectbox(
+            "Continuum covariance", covariance_modes, index=default_mode,
+            format_func=lambda value: value.capitalize(),
+            key="analysis_covariance_mode",
+        )
+    fit_tag = fit_directory.name
+    is_thinned = sampling != order
+    covariance_label = covariance_mode.capitalize()
+    requested: list[tuple[Path, str, str]] = []
+    if not is_thinned:
+        requested.extend((
+            (window, "interpolation_beta_over_g4_with_data",
+             "Interpolation fit with data and coefficients"),
+            (window, "interpolation_quality", "Interpolation fit quality"),
+        ))
+    requested.extend((
+        (order, "processed_massless_limit_largest_volume",
+         "Massless-limit largest-volume data"),
+        (order, "massless_infinite_volume_beta_and_ratio_vs_g2",
+         "Massless infinite-volume beta and beta/g⁴ versus g²"),
+    ))
+    requested.extend((
+        (window / covariance_mode, "continuum_beta_over_g4_vs_g2",
+         rf"{covariance_label} continuum $\beta_{{\rm GF}}/g_{{\rm GF}}^4$ versus $g_{{\rm GF}}^2$"),
+        (window / covariance_mode, "continuum_a2_over_t_beta",
+         rf"{covariance_label} $\beta_{{\rm GF}}$ versus $a^2/t$"),
+        (window / covariance_mode, "continuum_a2_over_t_beta_over_g4",
+         rf"{covariance_label} $\beta_{{\rm GF}}/g_{{\rm GF}}^4$ versus $a^2/t$"),
+        (window / covariance_mode, "continuum_beta_vs_g2",
+         rf"{covariance_label} continuum $\beta_{{\rm GF}}$ versus $g_{{\rm GF}}^2$"),
+        (window / covariance_mode, "continuum_quality",
+         f"{covariance_label} continuum fit quality"),
+        (window, "diagonal_vs_correlated",
+         "Diagonal versus correlated continuum comparison"),
+    ))
+    if not is_thinned:
+        singular_origin = fit_tag in {"fit1", "fit2", "fit11", "fit12"}
+        extended_limit = (
+            "toward weak coupling (g² ≥ 0.1; singular origin excluded)"
+            if singular_origin else "to zero coupling"
+        )
+        requested.extend((
+            (window / "correlated", "figure11_integral_matching",
+             "Integral matching across operators with fitted b_p (correlated)"),
+            (order, "lambda_parameter_by_window",
+             "Interim blinded Lambda parameter across flow-time windows"),
+        ))
+        if fit_tag not in {"fit1", "fit2", "fit3"}:
+            requested.extend((
+                (window / "correlated_diagnostic",
+                 "extended_intermediate_to_zero",
+                 f"Extended intermediate interpolations {extended_limit}"),
+                (window / "correlated_diagnostic",
+                 "extended_interpolation_continuum_to_zero",
+                 f"Continuum limit of interpolations extended {extended_limit}"),
+            ))
     rows = []
     for folder, stem, label in requested:
-        path = order_level_plot(folder, stem)
+        path = result_plot(folder, stem, fit_tag)
         if path:
             rows.append({"category": label, "filename": path.name,
                          "absolute_path": str(path)})
@@ -482,13 +713,21 @@ def render_analysis_tab() -> None:
     with main_col:
         if plots.empty:
             st.info("No plot files were found in the selected section.")
-            st.code(str(selected_folder))
+            st.code(str(window))
             return
         paths = plots["absolute_path"].tolist()
-        state_key = "selected_analysis_plot"
-        if st.session_state.get(state_key) not in paths:
-            st.session_state[state_key] = paths[0]
-        current = paths.index(st.session_state[state_key])
+        selection_context = "__".join((
+            fit_tag, order.name, sampling.name, window.name, covariance_mode,
+        ))
+        state_key = make_widget_key(
+            "analysis_plot_selector", selection_context
+        )
+        stored_path = st.session_state.get(state_key)
+        if stored_path not in paths:
+            if state_key in st.session_state:
+                del st.session_state[state_key]
+            stored_path = None
+        current = paths.index(stored_path) if stored_path is not None else 0
         previous, selector, following = st.columns([1, 6, 1])
         with previous:
             if st.button("← Previous", width="stretch", key="analysis_previous"):
@@ -498,21 +737,20 @@ def render_analysis_tab() -> None:
             if st.button("Next →", width="stretch", key="analysis_next"):
                 st.session_state[state_key] = paths[(current + 1) % len(paths)]
                 rerun_app()
-        labels = {row.absolute_path: f"{row.category} — {row.filename}"
-                  for row in plots.itertuples()}
+        labels = {row.absolute_path: row.category for row in plots.itertuples()}
         with selector:
-            chosen = st.selectbox("Choose a plot", paths, index=current,
-                                  format_func=lambda value: labels[value],
-                                  label_visibility="collapsed",
-                                  key="analysis_plot_selector")
-        st.session_state[state_key] = chosen
-        row = plots.loc[plots["absolute_path"] == chosen].iloc[0]
-        st.markdown(
-            f"**Prior:** `{configuration_label(configuration)}` &nbsp; | &nbsp; "
-            f"**Order:** `{pretty_order(order)}` &nbsp; | &nbsp; "
-            f"**Flow time:** `{pretty_window(window)}` &nbsp; | &nbsp; "
-            f"**Plot:** `{row['category']}`"
-        )
+            selector_index = (None if state_key in st.session_state else current)
+            chosen = st.selectbox(
+                "Choose a plot", paths, index=selector_index,
+                format_func=lambda value: labels[value],
+                label_visibility="collapsed", key=state_key,
+            )
+        if chosen not in labels:
+            chosen = paths[0]
+        matching_rows = plots.loc[plots["absolute_path"] == chosen]
+        if matching_rows.empty:
+            st.warning("The selected plot changed while results were rescanned.")
+            return
         display_plot(Path(chosen))
 
 
@@ -537,27 +775,23 @@ def render_iv_tab() -> None:
     st.markdown("### Infinite-volume extrapolation plots")
     controls, plots_col = st.columns([0.95, 3.05], gap="large")
     with controls:
-        configurations = [Path(value) for value in discover_configurations()]
-        configuration = next(
-            (path for path in configurations if path.name == "fit4_width1000"), None
-        )
-        if configuration is None:
-            st.error("The `fit4_width1000` result folder was not found.")
+        configuration = ANALYSIS_ROOT / "fit4_nopriors"
+        if not configuration.is_dir():
+            st.error("The Fit 4 no-prior result folder was not found on T7.")
             return
         st.markdown("**Fit4 prior configuration**")
-        st.markdown("Prior width 1000 — xerrors=True")
-        orders = list_orders(configuration)
+        st.markdown("No coefficient priors")
+        orders = list_analysis_orders(configuration, "fit4")
         if not orders:
-            st.warning(f"No order folders were found in `{configuration}`.")
+            st.warning("No completed Fit 4 no-prior order folders were found.")
             return
         order = st.selectbox("Correction order", orders, format_func=pretty_order,
                              key="iv_order")
         if st.button("Rescan IV plots", width="stretch", key="iv_rescan"):
-            discover_configurations.clear()
             rerun_app()
     with plots_col:
         st.markdown(
-            f"**Prior:** `{configuration_label(configuration)}` &nbsp; | &nbsp; "
+            f"**Configuration:** No coefficient priors &nbsp; | &nbsp; "
             f"**Order:** `{pretty_order(order)}`"
         )
         for plot_label, stem in INFINITE_VOLUME_PLOTS:
@@ -567,6 +801,87 @@ def render_iv_tab() -> None:
                 display_plot(plot_path, height=720)
             else:
                 st.warning(f"The selected order does not contain `{stem}.png` or `.pdf`.")
+
+
+CHIRAL_BETAS = (
+    ("7p00", "7"),
+    ("7p25", "7.25"),
+    ("7p50", "7.5"),
+)
+CHIRAL_OBSERVABLES = (
+    ("g2", r"$g_{\rm GF}^{2}$ chiral extrapolation"),
+    ("beta", r"$\beta_{\rm GF}$ chiral extrapolation"),
+)
+
+
+def render_chiral_tab() -> None:
+    st.markdown("### Chiral extrapolation plots")
+    controls, plots_col = st.columns([0.95, 3.05], gap="large")
+    with controls:
+        if st.button("Rescan results", width="stretch", key="chiral_rescan"):
+            discover_analysis_fits.clear()
+            discover_fit4_analysis_configurations.clear()
+            rerun_app()
+        fits = [Path(value) for value in discover_analysis_fits()]
+        if not fits:
+            st.error(
+                "No Fit 1–12 analysis folders were found. "
+                "Connect the T7 drive and rescan."
+            )
+            return
+        fit_directory = st.selectbox(
+            "Fit family", fits, format_func=fit_family_label,
+            key="chiral_fit_family",
+        )
+        result_root = fit_directory
+        if fit_directory.name == "fit4":
+            configurations = [
+                Path(value) for value in discover_fit4_analysis_configurations()
+            ]
+            if not configurations:
+                st.warning("No completed Fit 4 configurations were found.")
+                return
+            default_configuration = next(
+                (index for index, path in enumerate(configurations)
+                 if path.name == "fit4_nopriors"),
+                0,
+            )
+            result_root = st.selectbox(
+                "Fit 4 prior configuration", configurations,
+                index=default_configuration, format_func=configuration_label,
+                key="chiral_fit4_configuration",
+            )
+        orders = list_analysis_orders(result_root, fit_directory.name)
+        if not orders:
+            st.warning(f"No completed order folders were found in `{result_root}`.")
+            return
+        order = st.selectbox(
+            "Interpolation order", orders, format_func=pretty_order,
+            key="chiral_order",
+        )
+
+    fit_tag = fit_directory.name
+    with plots_col:
+        found = 0
+        for beta_tag, beta_label in CHIRAL_BETAS:
+            st.markdown(rf"#### $\beta_b={beta_label}$")
+            for observable, plot_label in CHIRAL_OBSERVABLES:
+                stem = f"chiral_extrapolation_{observable}_{beta_tag}"
+                plot_path = result_plot(order, stem, fit_tag)
+                if plot_path is None:
+                    st.warning(
+                        f"No {plot_label} plot was found for "
+                        rf"$\beta_b={beta_label}$."
+                    )
+                    continue
+                found += 1
+                st.markdown(f"**{plot_label}**")
+                display_plot(plot_path, height=720)
+        if found == 0:
+            st.info(
+                "This completed order predates the chiral-analysis outputs. "
+                "Rescan after its updated results are copied to T7."
+            )
 
 
 def parse_diagnostic(path: Path) -> dict[str, str]:
@@ -650,7 +965,7 @@ def find_summary_csvs() -> list[str]:
     return sorted(found)
 
 
-DISPLAYED_BETAS = {7.0, 7.25, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0,
+DISPLAYED_BETAS = {7.0, 7.125, 7.25, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0,
                    11.0, 12.0, 14.0, 16.0, 18.0, 20.0}
 DISPLAYED_SPATIAL_EXTENTS = {20, 24, 32, 40, 48}
 ENSEMBLE_FILE_PATTERN = re.compile(
@@ -694,23 +1009,26 @@ def ensemble_statistics_frame(
             "mass": float(match.group("mass").replace("p", ".")),
             "flow": "wilson",
             "configurations": configurations,
-            "bins": configurations // 15,
         })
-    return pd.DataFrame(rows).sort_values(
+    columns = ("beta_b", "volume", "mass", "flow", "configurations")
+    return pd.DataFrame(rows, columns=columns).sort_values(
         ["beta_b", "volume", "mass"], kind="stable", ignore_index=True
     )
 
 
 def render_summary_tab() -> None:
     st.markdown("### Data summary table")
-    st.markdown(
-        "Available Wilson-flow ensembles and their configuration counts. The "
-        "reported bin count uses **binsize = 15**."
-    )
+    st.markdown("Available Wilson-flow ensembles and their configuration counts.")
+    if st.button("Rescan ensemble data", key="summary_rescan"):
+        ensemble_statistics_frame.clear()
+        rerun_app()
     ensemble_frame = ensemble_statistics_frame(data_inventory_fingerprint())
+    if ensemble_frame.empty:
+        st.info("No nonempty Wilson-flow ensemble files were found.")
+        return
     display_frame = ensemble_frame.rename(columns={
         "beta_b": "β_b", "volume": "Volume", "mass": "Mass",
-        "flow": "Flow", "configurations": "Configurations", "bins": "Bins",
+        "flow": "Flow", "configurations": "Configurations",
     })
     table_html = display_frame.to_html(
         index=False, classes="ensemble-table", border=0,
@@ -725,14 +1043,16 @@ def render_summary_tab() -> None:
     )
 
 
-tab_analysis, tab_iv, tab_diagnostics, tab_summary = st.tabs((
-    "Analysis plots", "Infinite-volume extrapolation",
+tab_analysis, tab_iv, tab_chiral, tab_diagnostics, tab_summary = st.tabs((
+    "Analysis plots", "Infinite-volume extrapolation", "Chiral extrapolation",
     "Autocorr / binsize diagnostics", "Data summary table",
 ))
 with tab_analysis:
     render_analysis_tab()
 with tab_iv:
     render_iv_tab()
+with tab_chiral:
+    render_chiral_tab()
 with tab_diagnostics:
     render_diagnostics_tab()
 with tab_summary:
