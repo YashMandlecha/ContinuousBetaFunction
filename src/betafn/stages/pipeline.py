@@ -112,6 +112,7 @@ class PipelineMixin:
             "nf": self.nf,
             "gauge_action": self.gauge_action,
             "binsize": self._binsize,
+            "covariance_estimator": self._active_covariance_estimator,
         }
 
     def report(self) -> str:
@@ -153,6 +154,14 @@ class PipelineMixin:
             verbosity=config.verbosity,
             use_gamma_method=config.use_gamma_method,
             gamma_window_factor=config.gamma_window_factor,
+            covariance_estimator=config.covariance_estimator,
+            bartlett_bandwidth=config.bartlett_bandwidth,
+            bartlett_bandwidth_method=config.bartlett_bandwidth_method,
+            bartlett_window_factor=config.bartlett_window_factor,
+            bartlett_max_fraction=config.bartlett_max_fraction,
+            lugsail_r=config.lugsail_r,
+            lugsail_c=config.lugsail_c,
+            spectral_psd_adjust=config.spectral_psd_adjust,
         )
 
     def run_chiral(self, config: AnalysisConfig) -> None:

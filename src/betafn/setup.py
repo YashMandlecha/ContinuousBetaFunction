@@ -22,6 +22,7 @@ from .processing.gamma import (
     gamma_method_average,
     integrated_autocorrelation_time,
 )
+from .processing.bartlett import bartlett_spectral_average
 from .processing.finite_volume import delta_finite_volume
 from .processing.tln import delta_tln
 
@@ -59,6 +60,9 @@ class SetupBetaFunction:
         self.avg_data: dict = {}
         self.combine: dict[str, dict[str, float]] = {}
         self._ensemble_stats: dict[EnsembleKey, dict[str, object]] = {}
+        self.covariance_estimator_diagnostics: dict[EnsembleKey, dict[str, object]] = {}
+        self._active_covariance_estimator = "standard"
+        self._last_bartlett_diagnostics = None
         self.skipped_ensembles: dict[EnsembleKey, str] = {}
 
         self.log = BetaFunctionLog(logfn)
@@ -157,6 +161,35 @@ class SetupBetaFunction:
     def _gamma_method_average(self, data: dict, process=None, window_factor: float = 3.0) -> dict:
         """Delegate to the module-level gamma_method_average function."""
         return gamma_method_average(data, process=process, window_factor=window_factor)
+
+    def _bartlett_spectral_average(
+        self,
+        data: dict,
+        process=None,
+        *,
+        bandwidth: int | None = None,
+        bandwidth_method: str = "self-consistent",
+        window_factor: float = 5.0,
+        max_fraction: float = 0.25,
+        lugsail_r: float = 1.0,
+        lugsail_c: float = 0.5,
+        psd_adjust: bool = True,
+    ) -> dict:
+        """Average a complete ensemble with one joint Bartlett estimate."""
+        result, diagnostics = bartlett_spectral_average(
+            data,
+            process=process,
+            bandwidth=bandwidth,
+            bandwidth_method=bandwidth_method,
+            window_factor=window_factor,
+            max_fraction=max_fraction,
+            lugsail_r=lugsail_r,
+            lugsail_c=lugsail_c,
+            psd_adjust=psd_adjust,
+            return_diagnostics=True,
+        )
+        self._last_bartlett_diagnostics = diagnostics
+        return result
 
     def _undorearrange(self, data: dict, flows: list[str], data_ref: dict):
         return {
@@ -278,6 +311,8 @@ class SetupBetaFunction:
         del self.data, self.avg_data
         self.data, self.avg_data = {}, {}
         self._ensemble_stats = {}
+        self.covariance_estimator_diagnostics = {}
+        self._last_bartlett_diagnostics = None
         self.skipped_ensembles = {}
 
     def _renew_gvar_environment(self) -> None:
@@ -399,9 +434,14 @@ class SetupBetaFunction:
         rearranged = self._rearrange(raw_by_flow)
         rearranged = self._precombine_rearranged(rearranged)   # combine before averaging
         self.data[ensemble.coupling][ensemble.volume][ensemble.mass] = self._build_unaveraged_output(flows, raw_by_flow, rearranged)
+        self._last_bartlett_diagnostics = None
         self.avg_data[ensemble.coupling][ensemble.volume][ensemble.mass] = self._build_averaged_output(
             ensemble, flows, raw_by_flow, hooks, rearranged,
         )
+        if self._last_bartlett_diagnostics is not None:
+            self.covariance_estimator_diagnostics[ensemble] = {
+                **self._last_bartlett_diagnostics.as_dict(),
+            }
         if verbosity >= 1:
             print("dt =", self._stop_timer(), "(secs)\n" + 25 * "-.")
 
@@ -431,6 +471,14 @@ class SetupBetaFunction:
         verbosity: int = 0,
         use_gamma_method: bool = False,
         gamma_window_factor: float = 3.0,
+        covariance_estimator: str | None = None,
+        bartlett_bandwidth: int | None = None,
+        bartlett_bandwidth_method: str = "self-consistent",
+        bartlett_window_factor: float = 5.0,
+        bartlett_max_fraction: float = 0.25,
+        lugsail_r: float = 2.0,
+        lugsail_c: float = 0.5,
+        spectral_psd_adjust: bool = True,
     ):
         """Load and preprocess all ensembles into the analysis-ready avg_data structure.
 
@@ -440,13 +488,55 @@ class SetupBetaFunction:
         Results are cached within the Python session so repeated calls with the
         same geometry are fast.  No pre-computed ``.tln`` files are required.
         """
-        if use_gamma_method and average_data is None:
+        if covariance_estimator is None:
+            covariance_estimator = "gamma" if use_gamma_method else "standard"
+        covariance_estimator = covariance_estimator.lower().replace("_", "-")
+        if covariance_estimator not in ("standard", "gamma", "bartlett", "lugsail"):
+            raise BetaFunctionException(
+                "covariance_estimator must be 'standard', 'gamma', 'bartlett', or 'lugsail'"
+            )
+        if use_gamma_method and covariance_estimator != "gamma":
+            raise BetaFunctionException(
+                "use_gamma_method=True conflicts with covariance_estimator="
+                f"{covariance_estimator!r}"
+            )
+        if average_data is not None and covariance_estimator != "standard":
+            raise BetaFunctionException(
+                "A custom average_data hook cannot be combined with an internal "
+                "spectral covariance estimator"
+            )
+        self._active_covariance_estimator = covariance_estimator
+
+        if covariance_estimator == "gamma" and average_data is None:
             _wf = gamma_window_factor
 
             def _gm_average(d, process=None):
                 return self._gamma_method_average(d, process=process, window_factor=_wf)
 
             average_data = _gm_average
+        elif covariance_estimator in ("bartlett", "lugsail") and average_data is None:
+            _bandwidth = bartlett_bandwidth
+            _bandwidth_method = bartlett_bandwidth_method
+            _wf = bartlett_window_factor
+            _max_fraction = bartlett_max_fraction
+            _lugsail_r = lugsail_r if covariance_estimator == "lugsail" else 1.0
+            _lugsail_c = lugsail_c
+            _psd_adjust = spectral_psd_adjust
+
+            def _bartlett_average(d, process=None):
+                return self._bartlett_spectral_average(
+                    d,
+                    process=process,
+                    bandwidth=_bandwidth,
+                    bandwidth_method=_bandwidth_method,
+                    window_factor=_wf,
+                    max_fraction=_max_fraction,
+                    lugsail_r=_lugsail_r,
+                    lugsail_c=_lugsail_c,
+                    psd_adjust=_psd_adjust,
+                )
+
+            average_data = _bartlett_average
 
         hooks = self._build_process_hooks(get_data=get_data, average_data=average_data, preprocess_data=preprocess_data)
         self._configure_processing(

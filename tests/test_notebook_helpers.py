@@ -1,34 +1,10 @@
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-import sys
 import unittest
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC_BETAFN = ROOT / "src" / "betafn"
+import betafn.betafn as betafn_module
 
 
-def _load_module(module_name: str, file_path: Path):
-    spec = importlib.util.spec_from_file_location(module_name, str(file_path))
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load spec for {module_name} from {file_path}")
-    module = importlib.util.module_from_spec(spec)
-    # Register before exec so dataclasses and self-references resolve.
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-try:
-    setup_module = _load_module("setup", SRC_BETAFN / "setup.py")
-    betafn_module = _load_module("betafn_analysis", SRC_BETAFN / "betafn.py")
-    IMPORT_OK = True
-except Exception:  # pragma: no cover - environment-dependent
-    IMPORT_OK = False
-
-
-@unittest.skipUnless(IMPORT_OK, "Scientific dependencies are not available in this environment")
 class TestNotebookFacingHelpers(unittest.TestCase):
     def test_analysis_summary_schema(self):
         bf = betafn_module.BetaFunction(nf=4)

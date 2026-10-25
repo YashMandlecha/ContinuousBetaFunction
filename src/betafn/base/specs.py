@@ -73,6 +73,14 @@ class AnalysisConfig:
     binsize: int = 1
     use_gamma_method: bool = False
     gamma_window_factor: float = 3.0
+    covariance_estimator: str | None = None
+    bartlett_bandwidth: int | None = None
+    bartlett_bandwidth_method: str = "self-consistent"
+    bartlett_window_factor: float = 5.0
+    bartlett_max_fraction: float = 0.25
+    lugsail_r: float = 2.0
+    lugsail_c: float = 0.5
+    spectral_psd_adjust: bool = True
     process_window: tuple[float, float] = (0.0, _numpy.inf)
     fit_window: tuple[float, float] | None = None
     diagonal: bool = False
@@ -94,6 +102,24 @@ class AnalysisConfig:
             raise BetaFunctionException("g2_grid must satisfy mng2 < mxg2 and dg2 > 0")
         if self.binsize <= 0:
             raise BetaFunctionException("binsize must be positive")
+        if self.covariance_estimator not in (None, "standard", "gamma", "bartlett", "lugsail"):
+            raise BetaFunctionException(
+                "covariance_estimator must be 'standard', 'gamma', 'bartlett', or 'lugsail'"
+            )
+        if self.bartlett_bandwidth is not None and self.bartlett_bandwidth < 1:
+            raise BetaFunctionException("bartlett_bandwidth must be positive")
+        if self.bartlett_window_factor <= 0.0:
+            raise BetaFunctionException("bartlett_window_factor must be positive")
+        if self.bartlett_bandwidth_method not in ("self-consistent", "plugin"):
+            raise BetaFunctionException(
+                "bartlett_bandwidth_method must be 'self-consistent' or 'plugin'"
+            )
+        if not 0.0 < self.bartlett_max_fraction < 1.0:
+            raise BetaFunctionException("bartlett_max_fraction must lie in (0, 1)")
+        if self.lugsail_r < 1.0:
+            raise BetaFunctionException("lugsail_r must be at least one")
+        if not 0.0 <= self.lugsail_c < 1.0:
+            raise BetaFunctionException("lugsail_c must lie in [0, 1)")
         if self.error_mode not in ("fit", "shifted", "gp"):
             raise BetaFunctionException("error_mode must be 'fit', 'shifted', or 'gp'")
 
@@ -109,6 +135,14 @@ class AnalysisConfig:
             "binsize": self.binsize,
             "use_gamma_method": self.use_gamma_method,
             "gamma_window_factor": self.gamma_window_factor,
+            "covariance_estimator": self.covariance_estimator,
+            "bartlett_bandwidth": self.bartlett_bandwidth,
+            "bartlett_bandwidth_method": self.bartlett_bandwidth_method,
+            "bartlett_window_factor": self.bartlett_window_factor,
+            "bartlett_max_fraction": self.bartlett_max_fraction,
+            "lugsail_r": self.lugsail_r,
+            "lugsail_c": self.lugsail_c,
+            "spectral_psd_adjust": self.spectral_psd_adjust,
             "process_window": list(self.process_window),
             "fit_window": None if self.fit_window is None else list(self.fit_window),
             "continuum_window": list(self.continuum_window),

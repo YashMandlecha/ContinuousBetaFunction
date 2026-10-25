@@ -11,6 +11,7 @@ from tqdm import tqdm as _tqdm
 
 from ..base.exceptions import BetaFunctionException
 from ..fitting.containers import FitInput, StageStore
+from ..fitting.goodness import bruno_sommer_goodness_of_fit
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +157,27 @@ class ContinuumMixin:
                 jacobian[row] = _gvar.deriv(value, primaries)
         return jacobian
 
+    def _model_hessian(self, fcn, x, params: dict):
+        """Numerical second parameter derivatives for Appendix-A diagnostics."""
+        flat, spec = _flatten_pdict(params)
+        means = _numpy.asarray(_gvar.mean(flat), dtype=float)
+        point_count = len(_numpy.atleast_1d(fcn(x, _unflatten_pdict(list(means), spec))))
+        hessian = _numpy.zeros((point_count, len(means), len(means)), dtype=float)
+        for alpha, value in enumerate(means):
+            step = _numpy.cbrt(_numpy.finfo(float).eps) * max(1.0, abs(float(value)))
+            plus, minus = means.copy(), means.copy()
+            plus[alpha] += step
+            minus[alpha] -= step
+            jacobian_plus = self._model_jacobian(
+                fcn, x, _unflatten_pdict(list(plus), spec)
+            )
+            jacobian_minus = self._model_jacobian(
+                fcn, x, _unflatten_pdict(list(minus), spec)
+            )
+            hessian[:, :, alpha] = (jacobian_plus - jacobian_minus) / (2.0 * step)
+        # Parameter derivatives commute for the smooth models used here.
+        return 0.5 * (hessian + hessian.swapaxes(1, 2))
+
     def _correlated_weighted_fit(self, x, y, fcn, weight_cov, prior=None, p0=None, extra_cov=None):
         """Weighted least-squares fit that keeps output parameters correlated with input gvars."""
         y = _numpy.asarray(y)
@@ -191,6 +213,40 @@ class ContinuumMixin:
         if noise_cov is not None:
             corrected = corrected + _gvar.gvar(_numpy.zeros(len(corrected)), _psd_clip(noise_cov))
         return _unflatten_pdict(list(corrected), spec), central
+
+    def _generalized_fit_quality(self, x, y, fcn, params, weight_cov, prior=None):
+        """Bruno--Sommer calibration for an unconstrained weighted fit."""
+        if prior:
+            return {
+                "generalized_expectation": None,
+                "generalized_effective_dof": None,
+                "generalized_p_value": None,
+                "generalized_note": "informative parameter priors require an augmented-data treatment",
+            }
+        values = _numpy.asarray(y, dtype=object).reshape(-1)
+        prediction = _numpy.asarray(fcn(x, params), dtype=object).reshape(-1)
+        design = self._model_jacobian(fcn, x, params)
+        hessian = self._model_hessian(fcn, x, params)
+        result = bruno_sommer_goodness_of_fit(
+            _gvar.mean(values) - _gvar.mean(prediction),
+            design,
+            _gvar.evalcov(values),
+            weight_cov,
+            model_hessian=hessian,
+        )
+        return {
+            "generalized_expectation": result.expectation,
+            "generalized_reduced_chi2": (
+                result.observed / result.expectation
+                if result.expectation > 0.0 else None
+            ),
+            "generalized_effective_dof": result.effective_dof,
+            "generalized_p_value": result.p_value,
+            "generalized_rank": result.rank,
+            "generalized_expectation_parameter_sdev": (
+                result.expectation_parameter_sdev
+            ),
+        }
 
     def _gp_log_marginal(self, residuals, covariance) -> float:
         sign, logdet = _numpy.linalg.slogdet(covariance)
@@ -361,6 +417,12 @@ class ContinuumMixin:
                         prior=fit_prior, p0=fit_p0, extra_cov=extra_cov,
                     )
                     self._record_continuum_point(flow, obs, g2, fit, times, beta_values, params=params, x_data=x_data)
+                    self.continuum.quality[flow][obs][-1].update(
+                        self._generalized_fit_quality(
+                            x_data, beta_values, fit_fcn, fit.p,
+                            weight_cov, prior=fit_prior,
+                        )
+                    )
                 else:
                     y_data = _gvar.gvar(means, weight_cov)
                     fit = self.continuum.model.fit(
@@ -368,6 +430,12 @@ class ContinuumMixin:
                         FitInput(x=x_data, y=y_data, labels=times),
                     )
                     self._record_continuum_point(flow, obs, g2, fit, times, y_data, x_data=x_data)
+                    self.continuum.quality[flow][obs][-1].update(
+                        self._generalized_fit_quality(
+                            x_data, beta_values, fit_fcn, fit.p,
+                            weight_cov, prior=fit_prior,
+                        )
+                    )
 
                 if v >= 2:
                     print(self.betas[flow][obs][-1])
@@ -412,7 +480,7 @@ class ContinuumMixin:
         artifact_prior: dict | None = None,
         artifact_p0: dict | None = None,
         ntrp_fcn=None,
-        cov_mode: str = "kernel",
+        cov_mode: str = "empirical",
         kernel: str = "rbf",
         alpha: float = 0.25,
         gp: bool = False,

@@ -12,7 +12,7 @@
 # quantity is a0=z*A0.  Its evaluated interpolation is passed unchanged to the
 # same per-g^2 continuum extrapolation used by the other fits.
 # 
-# Every plot family has its own cell. Outputs are organized as `fit4/order_4/t_<min>_<max>/<mode>/`, where mode is `diagonal` or `correlated`. The correlated result uses the upstream kernel covariance. Rectangle measurements are combined at the raw-history level into the Symanzik observable before its dedicated TLN correction.
+# Every plot family has its own cell. Outputs are organized as `fit4/order_4/t_<min>_<max>/<mode>/`, where mode is `diagonal` or `correlated`. The correlated result uses the empirical covariance propagated from a joint multivariate zero-lugsail Bartlett spectral estimate of each ensemble's configuration history. Rectangle measurements are combined at the raw-history level into the Symanzik observable before its dedicated TLN correction.
 
 # In[1]:
 
@@ -106,7 +106,38 @@ parser.add_argument('--data-dir', type=Path, default=os.environ.get('BETAFN_DATA
 parser.add_argument('--output-base', type=Path, default=os.environ.get('BETAFN_OUTPUT_BASE', REPO_ROOT / 'hpcc_outputs'))
 parser.add_argument('--correction', choices=('tln', 'tree-level-normalization', 'finite-volume', 'none'), default='tln')
 parser.add_argument('--binsize', type=int, default=15)
-parser.add_argument('--use-gamma-method', action=argparse.BooleanOptionalAction, default=True)
+parser.add_argument(
+    '--covariance-estimator',
+    choices=('lugsail', 'original-bartlett', 'bartlett', 'gamma', 'standard'),
+    default='lugsail',
+    help=(
+        'Configuration-history covariance estimator. Zero-lugsail Bartlett '
+        'is the production default; original-bartlett restores vanilla Bartlett '
+        'with the former self-consistent bandwidth in a separate output family; '
+        'standard is the uncorrected sample covariance.'
+    ),
+)
+parser.add_argument(
+    '--bartlett-bandwidth', type=int, default=None,
+    help='Fixed Bartlett lag bandwidth; omit for a common automatic window per ensemble.',
+)
+parser.add_argument(
+    '--bartlett-bandwidth-method', choices=('plugin', 'self-consistent'),
+    default='plugin',
+    help='Automatic bandwidth selector used when --bartlett-bandwidth is omitted.',
+)
+parser.add_argument('--bartlett-window-factor', type=float, default=5.0)
+parser.add_argument('--bartlett-max-fraction', type=float, default=0.25)
+parser.add_argument('--lugsail-r', type=float, default=2.0)
+parser.add_argument('--lugsail-c', type=float, default=0.5)
+parser.add_argument(
+    '--spectral-psd-adjust', action=argparse.BooleanOptionalAction, default=True,
+    help='Project an indefinite lugsail covariance to PSD and record the correction.',
+)
+parser.add_argument(
+    '--use-gamma-method', action=argparse.BooleanOptionalAction, default=None,
+    help=argparse.SUPPRESS,
+)
 parser.add_argument('--latex', action='store_true', help='Use external LaTeX for plot text.')
 parser.add_argument(
     '--reviewed-weak-coupling',
@@ -139,10 +170,28 @@ if args.fit4_order < 1:
     parser.error('--fit4-order must be positive.')
 if args.fit4_width <= 0:
     parser.error('--fit4-width must be positive.')
+if args.lugsail_r < 1.0:
+    parser.error('--lugsail-r must be at least 1.')
+if not 0.0 <= args.lugsail_c < 1.0:
+    parser.error('--lugsail-c must lie in [0, 1).')
 if args.fit4_no_priors and args.model != 'fit4':
     parser.error('--fit4-no-priors is only valid with --model fit4.')
 if args.thinning_only:
     args.continuum_thinning = True
+if args.use_gamma_method is not None:
+    args.covariance_estimator = (
+        'gamma' if args.use_gamma_method else 'standard'
+    )
+COVARIANCE_PRESET = args.covariance_estimator
+if COVARIANCE_PRESET == 'original-bartlett':
+    # Exact comparison with the implementation used before the lugsail
+    # upgrade: vanilla Bartlett plus the common self-consistent window.
+    args.covariance_estimator = 'bartlett'
+    args.bartlett_bandwidth_method = 'self-consistent'
+    args.lugsail_r = 1.0
+PROCESSING_BINSIZE = (
+    args.binsize if args.covariance_estimator == 'standard' else 1
+)
 RUN_FULL_ANALYSIS = not args.thinning_only
 if args.latex:
     missing_tex_tools = [name for name in ('latex', 'dvipng') if shutil.which(name) is None]
@@ -313,6 +362,9 @@ else:
         rf'fit12, order {ORDER}, $a_0=zA_0$, standard continuum, no priors'
     )
 
+if COVARIANCE_PRESET == 'original-bartlett':
+    OUTPUT_FAMILY = f'{OUTPUT_FAMILY}_original_bartlett'
+
 OUTPUT_ROOT = args.output_base.expanduser().resolve() / OUTPUT_FAMILY / MODEL_TAG
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 RUN_CONFIGURATION_NAME = (
@@ -359,8 +411,18 @@ RUN_CONFIGURATION_NAME = (
     'data_dir': str(DATA_DIR),
     'output_root': str(OUTPUT_ROOT),
     'correction': CORRECTION,
-    'binsize': args.binsize,
-    'use_gamma_method': args.use_gamma_method,
+    'requested_binsize': args.binsize,
+    'effective_binsize': PROCESSING_BINSIZE,
+    'prebinning_applied': args.covariance_estimator == 'standard',
+    'covariance_estimator': args.covariance_estimator,
+    'covariance_preset': COVARIANCE_PRESET,
+    'bartlett_bandwidth': args.bartlett_bandwidth,
+    'bartlett_bandwidth_method': args.bartlett_bandwidth_method,
+    'bartlett_window_factor': args.bartlett_window_factor,
+    'bartlett_max_fraction': args.bartlett_max_fraction,
+    'lugsail_r': args.lugsail_r,
+    'lugsail_c': args.lugsail_c,
+    'spectral_psd_adjust': args.spectral_psd_adjust,
     'latex': args.latex,
     'reviewed_weak_coupling': args.reviewed_weak_coupling,
     'continuum_thinning': args.continuum_thinning,
@@ -371,6 +433,7 @@ RUN_CONFIGURATION_NAME = (
     'slurm_array_task_id': os.environ.get('SLURM_ARRAY_TASK_ID'),
 }, indent=2) + '\n')
 
+# Each strong-coupling beta has am_f = 0.001, 0.0025, 0.005 on L/a = 20, 24, 32.
 STRONG_COUPLINGS = ('7p00', '7p125', '7p25', '7p50')
 WEAK_COUPLINGS = (
     '8p00', '8p50', '9p00', '9p50', '10p0', '11p0',
@@ -419,7 +482,7 @@ THINNING_CONTINUUM_CASES = {
         'correlated': False, 'error_mode': 'fit',
     },
     'correlated': {
-        'cov_mode': 'kernel', 'diagonal': False, 'kernel': 'rbf',
+        'cov_mode': 'empirical', 'diagonal': False,
         'correlated': True, 'error_mode': 'fit',
     },
 }
@@ -732,12 +795,19 @@ config = betafn.AnalysisConfig(
     couplings=COUPLINGS,
     volumes=VOLUMES,
     correction=CORRECTION,
-    binsize=args.binsize,
-    use_gamma_method=args.use_gamma_method,
+    binsize=PROCESSING_BINSIZE,
+    covariance_estimator=args.covariance_estimator,
+    bartlett_bandwidth=args.bartlett_bandwidth,
+    bartlett_bandwidth_method=args.bartlett_bandwidth_method,
+    bartlett_window_factor=args.bartlett_window_factor,
+    bartlett_max_fraction=args.bartlett_max_fraction,
+    lugsail_r=args.lugsail_r,
+    lugsail_c=args.lugsail_c,
+    spectral_psd_adjust=args.spectral_psd_adjust,
     process_window=(1.5, 10.5),
     fit_window=(2.0, 10.0),
     error_mode='fit',
-    cov_mode='kernel',
+    cov_mode='empirical',
     correlated=True,
     verbosity=0,
 )
@@ -942,8 +1012,29 @@ if args.validate_only:
 bf.run_processing(config)
 print('correction:', bf._process_config.correction)
 print('processed couplings:', sorted(bf.avg_data, key=beta_value))
-print('binsize:', bf._binsize)
+print('pre-binning:', (
+    f'binsize {bf._binsize}'
+    if args.covariance_estimator == 'standard'
+    else 'not applied; spectral estimator uses the ordered raw history'
+))
 print(bf.data_report())
+if bf.covariance_estimator_diagnostics:
+    covariance_rows = []
+    for ensemble, diagnostics in sorted(
+        bf.covariance_estimator_diagnostics.items(),
+        key=lambda item: item[0].sort_key,
+    ):
+        covariance_rows.append({
+            'coupling': ensemble.coupling,
+            'volume': ensemble.volume,
+            'mass': ensemble.mass,
+            **diagnostics,
+        })
+    covariance_diagnostics = pd.DataFrame(covariance_rows)
+    covariance_diagnostics.to_csv(
+        OUTPUT_ROOT / 'spectral_covariance_diagnostics.csv', index=False
+    )
+    print(covariance_diagnostics.to_string(index=False))
 
 
 # ## Plot 1 — processed largest-volume data
@@ -1016,7 +1107,7 @@ IV_COUPLINGS = tuple(
 )
 
 print('active couplings:', ACTIVE_COUPLINGS)
-print('strong couplings awaiting data:', MISSING_STRONG_COUPLINGS or 'none')
+print('configured strong couplings without usable data:', MISSING_STRONG_COUPLINGS or 'none')
 
 EXPECTED_CHIRAL_MASSES = ('0p001', '0p0025', '0p005')
 inventory_rows = []
@@ -1907,7 +1998,7 @@ plt.show()
 plt.close(fig)
 
 
-# ## Continuum scan — diagonal and kernel-correlated
+# ## Continuum scan — diagonal and Bartlett-correlated
 # 
 # Each case is serialized immediately to its own range/mode folder, matching the reference scan organization and preventing all fit covariance objects from accumulating in memory.
 
@@ -1933,8 +2024,7 @@ def _experimental_fit12_joint_continuum(window, mode):
         'method': 'fit12_joint_linear_gls',
         'window': tuple(window),
         'g2_range': tuple(G2_GRID),
-        'cov_mode': 'kernel' if mode == 'correlated' else 'diagonal',
-        'kernel': 'rbf',
+        'cov_mode': 'empirical' if mode == 'correlated' else 'diagonal',
         'tau0': float(config.tau0),
         'constraints': {
             'a0': 'z*A0', 'c0': '1 fixed for every z',
@@ -1989,8 +2079,7 @@ def _experimental_fit12_joint_continuum(window, mode):
             ]
             weight_covariance = bf._weight_covariance(
                 y,
-                cov_mode='kernel' if mode == 'correlated' else 'diagonal',
-                kernel='rbf',
+                cov_mode='empirical' if mode == 'correlated' else 'diagonal',
                 distances=distances,
             )
             weight_covariance = 0.5 * (
@@ -4064,7 +4153,7 @@ if RUN_FULL_ANALYSIS and args.reviewed_weak_coupling:
 # In[ ]:
 
 
-assert config.binsize==args.binsize and config.correction==CORRECTION
+assert config.binsize==PROCESSING_BINSIZE and config.correction==CORRECTION
 assert config.combine=={'s': {'p':5/3,'s':-2/3}}
 if RUN_FULL_ANALYSIS:
     rows=[]

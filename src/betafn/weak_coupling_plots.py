@@ -33,7 +33,7 @@ def run_reviewed_weak_coupling_plots(
         for operator in observables:
             matched = continuum_from_extended_interpolants(
                 bf, flow, operator, window, match_g2, tau0=config.tau0,
-                cov_mode="kernel", kernel="rbf", enforce_domains=True,
+                cov_mode="empirical", enforce_domains=True,
             )
             x = np.asarray(case["g2s"][flow][operator], dtype=float)
             y = np.asarray(case["betas"][flow][operator], dtype=object) / x**2
@@ -177,7 +177,7 @@ def run_reviewed_weak_coupling_plots(
         for operator in observables:
             result = continuum_from_extended_interpolants(
                 bf, flow, operator, window, direct_grid, tau0=config.tau0,
-                cov_mode="kernel", kernel="rbf",
+                cov_mode="empirical",
             )
             direct_results[window][operator] = result
             x, y = result["g2"], result["beta_over_g4"]
