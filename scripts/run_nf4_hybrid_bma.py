@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # coding: utf-8
-"""Run the NF4 joint weak/strong hybrid Bayesian model average.
+"""Run the NF4 weak/strong hybrid Bayesian model average.
 
 This is the batch counterpart of
 ``nf4_hybrid_weak_fit4_fit11_pade_bma.ipynb``.  User-editable model choices
@@ -43,7 +43,7 @@ plt.rcParams.update({
 
 
 parser = argparse.ArgumentParser(
-    description='Run the NF4 joint weak/strong hybrid Bayesian model average.'
+    description='Run independent-flow-time NF4 weak/strong hybrid BMAs.'
 )
 parser.add_argument('--data-dir', type=Path, default=os.environ.get('BETAFN_DATA_DIR'))
 parser.add_argument(
@@ -60,7 +60,15 @@ parser.add_argument(
         'BETAFN_HYBRID_WORKERS',
         int(os.environ.get('SLURM_CPUS_PER_TASK', '2')),
     )),
-    help='Independent candidate-model processes (default: 2 locally or all allocated SLURM CPUs).',
+    help='Independent target/model processes (default: 2 locally or all allocated SLURM CPUs).',
+)
+parser.add_argument(
+    '--continuum-workers', type=int,
+    default=int(os.environ.get(
+        'BETAFN_CONTINUUM_WORKERS',
+        int(os.environ.get('SLURM_CPUS_PER_TASK', '2')),
+    )),
+    help='Independent continuum-GLS processes (default: 2 locally or all allocated SLURM CPUs).',
 )
 parser.add_argument(
     '--validate-only', action='store_true',
@@ -69,12 +77,14 @@ parser.add_argument(
 args = parser.parse_args()
 if args.hybrid_workers < 1:
     parser.error('--hybrid-workers must be at least one')
+if args.continuum_workers < 1:
+    parser.error('--continuum-workers must be at least one')
 RUN_STARTED = time_module.time()
 if args.data_dir is None and not args.validate_only:
     parser.error('Set --data-dir or BETAFN_DATA_DIR.')
 
 
-ANALYSIS_ID = 'hybrid_fit4_fit11_pade_bma'
+ANALYSIS_ID = 'hybrid_fit4_fit11_eq7_linear_bma_independent_flow_times'
 ANALYSIS_FOOTER = 'hybridBMA'
 CORRECTION = 'tln'
 DATA_DIR = None if args.data_dir is None else args.data_dir.expanduser().resolve()
@@ -136,43 +146,44 @@ G2_T0 = (8.0 / 5.0) * np.pi**2
 # Each weak family can have its own selected correction orders. Delete a
 # family or an order here to exclude it from the BMA.
 HYBRID_WEAK_ORDERS_BY_FAMILY = {
-    'fit4': (4,),
-    'fit11': (4,),
+    'monotone': (6, 7, 8),
+    'monotone_constant': (6, 7, 8),
 }
 
 # Strong-coupling Pade orders are (numerator order, denominator order).
 # Denominator poles are constrained to the negative-z half-line.
 HYBRID_PADE_ORDERS = (
-    (3, 2),
-    (2, 1),
+    (1, 2),
+    (2, 3),
+    (3, 4),
 )
-# A latent N(0,1) variable transformed through Phi gives one global matching
-# fraction with an exact Uniform(0.2,0.8) prior, shared by all targets.
+# The Equation-7 strong branch is connected with the fixed C1 gap bridge;
+# no free matching-location parameter is used in this implementation.
 HYBRID_MATCH_FRACTIONS = (None,)
 HYBRID_MATCH_BOUNDS = (0.20, 0.80)
-HYBRID_CONTINUITIES = (1,)  # 1 -> C1; use (1, 2) to include C1 and C2
+HYBRID_CONTINUITIES = (1,)
+HYBRID_STRONG_FORM = 'eq7_linear'
 
 # Leave this as None to use the Cartesian selection above. Alternatively,
 # provide an exact list of models, for example:
 # HYBRID_EXPLICIT_MODELS = (
-#     dict(weak_family='fit4', weak_order=4,
-#          numerator_order=1, denominator_order=1,
-#          match_fraction=None, continuity=1),
-#     dict(weak_family='fit11', weak_order=5,
-#          numerator_order=2, denominator_order=1,
-#          match_fraction=None, continuity=1),
+#     dict(weak_family='monotone', weak_order=7,
+#          numerator_order=2, denominator_order=3,
+#          match_fraction=None, continuity=1,
+#          strong_form='eq7_linear'),
 # )
 HYBRID_EXPLICIT_MODELS = None
 HYBRID_MAX_WORKERS = args.hybrid_workers
+HYBRID_CONTINUUM_WORKERS = args.continuum_workers
 HYBRID_CHECKPOINT_ROOT = HYBRID_OUTPUT_ROOT / 'interpolation_checkpoints'
 
 RUN_HYBRID_THINNING = args.hybrid_thinning
 HYBRID_THINNING_SPACINGS = (0.10, 0.20, 0.30)
 HYBRID_PRIOR_WIDTHS = {
-    'weak_width': 5.0,
+    'weak_width': 1.5,
     'constant_width': 0.25,
-    'strong_width': 0.10,
-    'pole_log_width': 0.70,
+    'strong_width': 2.0,
+    'pole_log_width': 1.0,
 }
 
 def window_tag(window):
@@ -235,12 +246,12 @@ def progress_done(label):
 from betafn import (
     HybridInterpolationCandidate,
     default_hybrid_candidates,
-    fit_hybrid_bma_candidates,
+    fit_hybrid_bma_by_target,
     hybrid_match_fraction,
     hybrid_parameter_records,
     model_average_predictions,
     relative_partial_uncertainty_percent,
-    run_hybrid_bma_window,
+    run_hybrid_bma_by_target,
 )
 
 
@@ -252,6 +263,7 @@ def build_hybrid_candidates():
             match_fractions=HYBRID_MATCH_FRACTIONS,
             match_bounds=HYBRID_MATCH_BOUNDS,
             continuities=HYBRID_CONTINUITIES,
+            strong_form=HYBRID_STRONG_FORM,
         )
     else:
         candidates = tuple(
@@ -329,11 +341,16 @@ if args.validate_only:
     print(json.dumps({
         'analysis_id': ANALYSIS_ID,
         'candidate_count': len(HYBRID_CANDIDATES),
+        'fits_per_operator_flow_time': len(HYBRID_CANDIDATES),
+        'interpolation_treatment': 'independent_by_operator_and_flow_time',
+        'cross_flow_time_covariance': 'linear_response_to_shared_gvar_data',
         'candidates': candidate_configuration,
         'windows': WINDOWS,
         'g2_grid': G2_GRID,
         'hybrid_thinning': RUN_HYBRID_THINNING,
         'hybrid_workers': HYBRID_MAX_WORKERS,
+        'hybrid_continuum_workers': HYBRID_CONTINUUM_WORKERS,
+        'hybrid_strong_form': HYBRID_STRONG_FORM,
         'hybrid_match_bounds': list(HYBRID_MATCH_BOUNDS),
         'dataset_validation': dataset_validation,
     }, indent=2))
@@ -348,6 +365,7 @@ load_lambda_blinding_factor()  # validate without printing the hidden factor
 run_configuration = {
     'analysis_id': ANALYSIS_ID,
     'candidate_count': len(HYBRID_CANDIDATES),
+    'fits_per_operator_flow_time': len(HYBRID_CANDIDATES),
     'candidates': candidate_configuration,
     'model_prior_probability': 1.0 / len(HYBRID_CANDIDATES),
     'prior_widths': HYBRID_PRIOR_WIDTHS,
@@ -365,7 +383,12 @@ run_configuration = {
     'lugsail_c': 0.5,
     'hybrid_thinning': RUN_HYBRID_THINNING,
     'hybrid_workers': HYBRID_MAX_WORKERS,
+    'hybrid_continuum_workers': HYBRID_CONTINUUM_WORKERS,
+    'hybrid_strong_form': HYBRID_STRONG_FORM,
+    'hybrid_transition': 'C1 rational Hermite inside gap; weak extension 0.05',
     'hybrid_match_bounds': list(HYBRID_MATCH_BOUNDS),
+    'interpolation_treatment': 'independent_by_operator_and_flow_time',
+    'cross_flow_time_covariance': 'linear_response_to_shared_gvar_data',
     'hybrid_thinning_spacings': list(HYBRID_THINNING_SPACINGS),
     'slurm_job_id': os.environ.get('SLURM_JOB_ID'),
 }
@@ -1186,7 +1209,7 @@ plt.close(fig)
 
 
 
-progress_start('joint hybrid interpolation and evidence')
+progress_start('independent flow-time hybrid interpolation and evidence')
 hybrid_model_selection = pd.DataFrame(candidate_configuration)
 hybrid_model_selection['model_prior_probability'] = 1.0 / len(HYBRID_CANDIDATES)
 hybrid_model_selection.to_csv(
@@ -1197,11 +1220,8 @@ print(f'Selected {len(HYBRID_CANDIDATES)} hybrid models.')
 
 hybrid_interpolations = {}
 for window in WINDOWS:
-    print(
-        'hybrid interpolation:', window,
-        len(HYBRID_CANDIDATES), 'joint candidate models',
-    )
-    hybrid_interpolations[window] = fit_hybrid_bma_candidates(
+    print('hybrid interpolation:', window, 'independent operator/flow-time fits')
+    hybrid_interpolations[window] = fit_hybrid_bma_by_target(
         bf, window, FLOW, OBSERVABLES,
         weak_couplings=WEAK_COUPLINGS,
         strong_couplings=STRONG_COUPLINGS,
@@ -1212,14 +1232,18 @@ for window in WINDOWS:
     )
 
 evidence_rows = []
-for window, result in hybrid_interpolations.items():
-    for name, candidate_fit in result.candidate_fits.items():
-        evidence_rows.append({
-            'window': window_tag(window), 'model': name,
-            'log_evidence': candidate_fit.log_evidence,
-            'posterior_model_probability': result.weights[name],
-            **candidate_fit.candidate.metadata(),
-        })
+for window, target_results in hybrid_interpolations.items():
+    for key, result in target_results.items():
+        _, operator, flow_time = key
+        for name, candidate_fit in result.candidate_fits.items():
+            evidence_rows.append({
+                'window': window_tag(window), 'operator': operator,
+                'flow_time': float(flow_time),
+                'model': name,
+                'log_evidence': candidate_fit.log_evidence,
+                'posterior_model_probability': result.weights[name],
+                **candidate_fit.candidate.metadata(),
+            })
 hybrid_evidence = pd.DataFrame(evidence_rows)
 hybrid_evidence.to_csv(
     HYBRID_OUTPUT_ROOT / 'hybrid_model_evidence.csv', index=False
@@ -1232,7 +1256,8 @@ print(
 
 hybrid_coefficient_table = pd.DataFrame([
     row
-    for result in hybrid_interpolations.values()
+    for target_results in hybrid_interpolations.values()
+    for result in target_results.values()
     for row in hybrid_parameter_records(result)
 ])
 hybrid_coefficient_table.to_csv(
@@ -1240,12 +1265,12 @@ hybrid_coefficient_table.to_csv(
 )
 coefficient_text_path = HYBRID_OUTPUT_ROOT / 'hybrid_fitted_coefficients.txt'
 with coefficient_text_path.open('w') as stream:
-    for (window, model), rows in hybrid_coefficient_table.groupby(
-        ['window', 'model'], sort=False
+    for (window, operator, flow_time, model), rows in hybrid_coefficient_table.groupby(
+        ['window', 'operator', 'flow_time', 'model'], sort=False
     ):
         first = rows.iloc[0]
         stream.write(
-            f'Window {window}\nModel {model}\n'
+            f'Window {window}\nOperator {operator}\nFlow time {flow_time:g}\nModel {model}\n'
             f'log evidence = {first.log_evidence:.10g}\n'
             f'model probability = {first.model_probability:.10g}\n'
         )
@@ -1264,67 +1289,144 @@ print(
     f'Saved {len(hybrid_coefficient_table)} coefficient rows to',
     coefficient_text_path,
 )
-progress_done('joint hybrid interpolation and evidence')
+# Diagnose endpoint compatibility without altering any fitted coefficient.
+gap_rows = []
+for window, target_results in hybrid_interpolations.items():
+    for key, result in target_results.items():
+        for name, candidate_fit in result.candidate_fits.items():
+            candidate = candidate_fit.candidate
+            if candidate.strong_form != 'eq7_linear' or candidate.continuity != 1:
+                continue
+            a, b, y0, d0, y1, d1 = (
+                betafn.fitting.hybrid._rational_gap_endpoint_data(
+                    bf, candidate_fit.fit.p, candidate,
+                    candidate_fit.targets[key], 0,
+                )
+            )
+            secant = float(gv.mean((y1-y0)/(b-a)))
+            gap_rows.append({
+                'window': window_tag(window), 'operator': key[1],
+                'flow_time': float(key[2]), 'model': name,
+                'bridge_start_g2': a, 'bridge_end_g2': b,
+                'weak_slope': float(gv.mean(d0)),
+                'strong_slope': float(gv.mean(d1)),
+                'secant': secant,
+                'monotone_endpoint_compatible': (
+                    secant != 0.0 and gv.mean(d0)*secant >= 0.0
+                    and gv.mean(d1)*secant >= 0.0
+                ),
+            })
+hybrid_gap_diagnostics = pd.DataFrame(gap_rows)
+hybrid_gap_diagnostics.to_csv(
+    HYBRID_OUTPUT_ROOT / 'hybrid_gap_diagnostics.csv', index=False,
+)
+if not hybrid_gap_diagnostics.empty:
+    conflicts = hybrid_gap_diagnostics[
+        ~hybrid_gap_diagnostics.monotone_endpoint_compatible
+    ]
+    print(f'Gap endpoint slope conflicts: {len(conflicts)}/{len(gap_rows)}')
+    if not conflicts.empty:
+        print(conflicts.to_string(index=False))
+progress_done('independent flow-time hybrid interpolation and evidence')
 
 
 progress_start('candidate and model-averaged interpolation plots')
-central_interpolation = hybrid_interpolations[CENTRAL_WINDOW]
+central_interpolations = hybrid_interpolations[CENTRAL_WINDOW]
 
-# Evidence weights are available before any continuum extrapolation.
-weight_table = pd.DataFrame({
-    'model': list(central_interpolation.weights),
-    'weight': list(central_interpolation.weights.values()),
-}).sort_values('weight', ascending=False)
-displayed = weight_table.head(20).iloc[::-1]
-fig, ax = plt.subplots(figsize=(9, 7))
-ax.barh(displayed.model, displayed.weight, color='0.35')
-ax.set_xlabel('posterior model probability')
-ax.set_ylabel('complete weak/strong interpolation model')
-ax.set_title('Largest Bayesian model weights')
+# Evidence weights are specific to one operator and one flow time.
+fig, axes = plt.subplots(
+    1, len(OBSERVABLES), figsize=(7 * len(OBSERVABLES), 6), squeeze=False,
+)
+for ax, operator in zip(axes.ravel(), OBSERVABLES):
+    keys = sorted(
+        [key for key in central_interpolations if key[1] == operator],
+        key=lambda key: float(key[2]),
+    )
+    for model in central_interpolations[keys[0]].weights:
+        ax.plot(
+            [float(key[2]) for key in keys],
+            [central_interpolations[key].weights[model] for key in keys],
+            lw=1.4, label=model,
+        )
+    ax.set_xlabel(r'$t/a^2$')
+    ax.set_ylabel('posterior model probability')
+    ax.set_title(OP_LABELS[operator])
+axes.ravel()[-1].legend(frameon=False, fontsize=7)
 fig.tight_layout()
 base = HYBRID_OUTPUT_ROOT / 'hybrid_model_weights'
 fig.savefig(base.with_suffix('.pdf'), bbox_inches='tight')
 fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
 plt.show(); plt.close(fig)
 
-candidate_groups = {}
-for name, candidate_fit in central_interpolation.candidate_fits.items():
-    candidate = candidate_fit.candidate
-    group_key = (
-        candidate.weak_family, candidate.weak_order,
-        candidate.numerator_order, candidate.denominator_order,
-        candidate.match_fraction,
-        candidate.match_lower, candidate.match_upper,
-    )
-    candidate_groups.setdefault(group_key, []).append((name, candidate_fit))
-
 continuity_colors = {1: 'tab:blue', 2: 'tab:orange'}
 continuity_styles = {1: '-', 2: '--'}
-candidate_plot_jobs = [
-    (group_key, variants, operator)
-    for group_key, variants in candidate_groups.items()
-    for operator in OBSERVABLES
-]
-for plot_index, (group_key, variants, operator) in enumerate(
-    candidate_plot_jobs, start=1
-):
-    variants = sorted(variants, key=lambda item: item[1].candidate.continuity)
-    reference_candidate = variants[0][1]
-    keys = sorted(
-        [key for key in reference_candidate.targets
-         if key[0] == FLOW and key[1] == operator],
+candidate_plot_jobs = []
+candidate_group_keys = set()
+for operator in OBSERVABLES:
+    operator_keys = sorted(
+        [key for key in central_interpolations if key[1] == operator],
         key=lambda key: float(key[2]),
     )
-    selected_indices = sorted(set((0, len(keys) // 2, len(keys) - 1)))
+    selected_indices = sorted(set((0, len(operator_keys) // 2, len(operator_keys) - 1)))
+    selected_keys = tuple(operator_keys[index] for index in selected_indices)
+    interpolation_result = central_interpolations[selected_keys[0]]
+    candidate_groups = {}
+    for name, candidate_fit in interpolation_result.candidate_fits.items():
+        candidate = candidate_fit.candidate
+        group_key = (
+            candidate.weak_family, candidate.weak_order,
+            candidate.strong_form,
+            candidate.numerator_order, candidate.denominator_order,
+            candidate.match_fraction,
+            candidate.match_lower, candidate.match_upper,
+        )
+        candidate_groups.setdefault(group_key, []).append(name)
+        candidate_group_keys.add(group_key)
+    candidate_plot_jobs.extend(
+        (operator, selected_keys, group_key, names)
+        for group_key, names in candidate_groups.items()
+    )
+for plot_index, (
+    operator, selected_keys, group_key, variant_names
+) in enumerate(
+    candidate_plot_jobs, start=1
+):
     fig, axes = plt.subplots(
-        1, len(selected_indices), figsize=(6 * len(selected_indices), 5),
+        1, len(selected_keys), figsize=(6 * len(selected_keys), 5),
         squeeze=False, sharey=True,
     )
-    for ax, selected_index in zip(axes.ravel(), selected_indices):
-        key = keys[selected_index]
+    for ax, key in zip(axes.ravel(), selected_keys):
+        interpolation_result = central_interpolations[key]
+        variants = sorted(
+            [
+                (name, interpolation_result.candidate_fits[name])
+                for name in variant_names
+            ],
+            key=lambda item: item[1].candidate.continuity,
+        )
+        reference_candidate = variants[0][1]
         target = reference_candidate.targets[key]
         xmin, xmax = min(gv.mean(target.x)), max(gv.mean(target.x))
-        xgrid = np.linspace(xmin, xmax, 240)
+        xgrid = np.unique(np.r_[
+            np.linspace(xmin, xmax, 240),
+            target.match_low, target.match_high,
+            target.match_low + .05*(target.match_high-target.match_low),
+        ])
+        join_low = float(target.match_low)
+        join_high = float(target.match_high)
+        ax.axvspan(join_low, join_high, color='0.5', alpha=.055, zorder=0)
+        ax.axvline(join_low, color='0.35', ls=':', lw=1.1, zorder=1)
+        ax.axvline(join_high, color='0.35', ls='--', lw=1.1, zorder=1)
+        axis_transform = ax.get_xaxis_transform()
+        for position, region_label in (
+            (.5*(xmin+join_low), 'weak branch'),
+            (.5*(join_low+join_high), 'smooth gap'),
+            (.5*(join_high+xmax), 'Eq. (7)'),
+        ):
+            ax.text(
+                position, .025, region_label, transform=axis_transform,
+                ha='center', va='bottom', fontsize=8.5, color='0.25',
+            )
         ax.errorbar(
             gv.mean(target.x), gv.mean(target.y),
             xerr=gv.sdev(target.x), yerr=gv.sdev(target.y),
@@ -1340,12 +1442,29 @@ for plot_index, (group_key, variants, operator) in enumerate(
             )
             mean, sdev = gv.mean(prediction), gv.sdev(prediction)
             color = continuity_colors.get(continuity, f'C{continuity % 10}')
-            fitted_fraction = hybrid_match_fraction(candidate_fit)
-            label = (
-                f'C{continuity}; '
-                f'f={gv.mean(fitted_fraction):.3f}({gv.sdev(fitted_fraction):.3f}); '
-                f'P={central_interpolation.weights[name]:.3f}'
-            )
+            if candidate_fit.candidate.strong_form == 'eq7_linear':
+                label = (
+                    'C1 rational gap bridge; '
+                    f'P={interpolation_result.weights[name]:.3f}'
+                )
+            elif candidate_fit.candidate.strong_form == 'eq7_hermite':
+                label = (
+                    'C1 Hermite bridge; '
+                    f'P={interpolation_result.weights[name]:.3f}'
+                )
+            elif candidate_fit.candidate.strong_form == 'eq7_blend':
+                label = (
+                    'C2 gap blend; '
+                    f'P={interpolation_result.weights[name]:.3f}'
+                )
+            else:
+                fitted_fraction = hybrid_match_fraction(candidate_fit)
+                label = (
+                    f'C{continuity}; '
+                    f'f={gv.mean(fitted_fraction):.3f}'
+                    f'({gv.sdev(fitted_fraction):.3f}); '
+                    f'P={interpolation_result.weights[name]:.3f}'
+                )
             ax.plot(
                 xgrid, mean, color=color,
                 ls=continuity_styles.get(continuity, '-'), label=label,
@@ -1357,25 +1476,37 @@ for plot_index, (group_key, variants, operator) in enumerate(
         ax.set_xlabel(r'$g^2_{\rm GF}$')
     axes.ravel()[0].set_ylabel(r'$\beta_{\rm GF}$')
     axes.ravel()[0].legend(frameon=False, fontsize=10)
-    (family, order, numerator, denominator, fraction,
+    (family, order, strong_form, numerator, denominator, fraction,
      match_lower, match_upper) = group_key
+    if strong_form == 'eq7_linear':
+        transition_description = r'C1 gap bridge after $\beta_b=8$'
+    elif strong_form == 'eq7_hermite':
+        transition_description = r'C1 Hermite bridge across $\beta_b=8\to7.5$ gap'
+    elif strong_form == 'eq7_blend':
+        transition_description = r'C2 blend across $\beta_b=8\to7.5$ gap'
+    elif fraction is None:
+        transition_description = (
+            f'match fitted in [{match_lower:.2f}, {match_upper:.2f}]'
+        )
+    else:
+        transition_description = f'match={fraction:.2f}'
     fig.suptitle(
         f'{OP_LABELS[operator]}: {family} order {order}, '
-        f'Pade [{numerator}/{denominator}], '
-        + (
-            f'match fitted in [{match_lower:.2f}, {match_upper:.2f}]'
-            if fraction is None else f'match={fraction:.2f}'
-        )
+        f'{strong_form} [{numerator}/{denominator}], '
+        + transition_description
     )
     fig.tight_layout(rect=(0, 0, 1, .94))
     fraction_tag = (
-        (f'fitted_{match_lower:.2f}_{match_upper:.2f}'.replace('.', 'p'))
-        if fraction is None
-        else f'{fraction:.2f}'.replace('.', 'p')
+        'gap_8p00_7p50'
+        if strong_form in ('eq7_blend', 'eq7_hermite', 'eq7_linear')
+        else (
+            f'fitted_{match_lower:.2f}_{match_upper:.2f}'.replace('.', 'p')
+            if fraction is None else f'{fraction:.2f}'.replace('.', 'p')
+        )
     )
     base = HYBRID_OUTPUT_ROOT / (
         f'hybrid_candidate_interpolation_{family}_o{order}_'
-        f'pade_{numerator}_{denominator}_match_{fraction_tag}_{operator}'
+        f'{strong_form}_{numerator}_{denominator}_match_{fraction_tag}_{operator}'
     )
     fig.savefig(base.with_suffix('.pdf'), bbox_inches='tight')
     fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
@@ -1386,10 +1517,9 @@ for plot_index, (group_key, variants, operator) in enumerate(
         flush=True,
     )
 
-reference_fit = next(iter(central_interpolation.candidate_fits.values()))
 for operator in OBSERVABLES:
     keys = sorted(
-        [key for key in reference_fit.targets if key[0] == FLOW and key[1] == operator],
+        [key for key in central_interpolations if key[1] == operator],
         key=lambda key: float(key[2]),
     )
     selected_indices = sorted(set((0, len(keys) // 2, len(keys) - 1)))
@@ -1397,18 +1527,26 @@ for operator in OBSERVABLES:
     colors = plt.cm.viridis(np.linspace(.12, .88, len(selected_indices)))
     for color, selected_index in zip(colors, selected_indices):
         key = keys[selected_index]
+        interpolation_result = central_interpolations[key]
+        reference_fit = next(iter(interpolation_result.candidate_fits.values()))
         target = reference_fit.targets[key]
         xmin, xmax = min(gv.mean(target.x)), max(gv.mean(target.x))
-        xgrid = np.linspace(xmin, xmax, 240)
+        xgrid = np.unique(np.r_[
+            np.linspace(xmin, xmax, 240),
+            target.match_low, target.match_high,
+            target.match_low + .05*(target.match_high-target.match_low),
+        ])
         predictions = {
             name: np.asarray(
                 betafn.fitting.hybrid.evaluate_hybrid_target(
                     fit, bf, key, xgrid
                 ), dtype=object,
             )
-            for name, fit in central_interpolation.candidate_fits.items()
+            for name, fit in interpolation_result.candidate_fits.items()
         }
-        average = model_average_predictions(predictions, central_interpolation.weights)
+        average = model_average_predictions(
+            predictions, interpolation_result.weights
+        )
         ax.plot(xgrid, average.mean, color=color, label=rf'$t/a^2={float(key[2]):g}$')
         sigma = np.sqrt(np.clip(np.diag(average.covariance), 0.0, None))
         ax.fill_between(xgrid, average.mean - sigma, average.mean + sigma, color=color, alpha=.18)
@@ -1418,7 +1556,7 @@ for operator in OBSERVABLES:
             fmt='o', ms=4, capsize=2, color=color, alpha=.75,
         )
     ax.set_xlabel(r'$g^2_{\rm GF}$'); ax.set_ylabel(r'$\beta_{\rm GF}$')
-    ax.set_title(f'{OP_LABELS[operator]}: joint weak/strong BMA interpolation')
+    ax.set_title(f'{OP_LABELS[operator]}: weak/strong BMA interpolation')
     ax.legend(frameon=False)
     fig.tight_layout()
     base = HYBRID_OUTPUT_ROOT / f'hybrid_bma_interpolation_{operator}'
@@ -1428,67 +1566,287 @@ for operator in OBSERVABLES:
 
 progress_done('candidate and model-averaged interpolation plots')
 
-progress_start('candidate-wise continuum extrapolation')
+progress_start('candidate and model-averaged beta/g^4 interpolation plots')
+
+def hybrid_variant_label(candidate_fit, interpolation_result, name):
+    candidate = candidate_fit.candidate
+    if candidate.strong_form == 'eq7_linear':
+        prefix = 'C1 rational gap bridge'
+    elif candidate.strong_form == 'eq7_hermite':
+        prefix = 'C1 Hermite bridge'
+    elif candidate.strong_form == 'eq7_blend':
+        prefix = 'C2 gap blend'
+    else:
+        fraction = hybrid_match_fraction(candidate_fit)
+        prefix = (
+            f'C{candidate.continuity}; '
+            f'f={gv.mean(fraction):.3f}({gv.sdev(fraction):.3f})'
+        )
+    return prefix + f'; P={interpolation_result.weights[name]:.3f}'
+
+
+for plot_index, (
+    operator, selected_keys, group_key, variant_names
+) in enumerate(candidate_plot_jobs, start=1):
+    fig, axes = plt.subplots(
+        1, len(selected_keys), figsize=(6*len(selected_keys), 5),
+        squeeze=False, sharey=True,
+    )
+    for ax, key in zip(axes.ravel(), selected_keys):
+        interpolation_result = central_interpolations[key]
+        variants = sorted(
+            [(name, interpolation_result.candidate_fits[name])
+             for name in variant_names],
+            key=lambda item: item[1].candidate.continuity,
+        )
+        reference_fit = variants[0][1]
+        target = reference_fit.targets[key]
+        target_x = np.asarray(target.x, dtype=object)
+        target_ratio = np.asarray(target.y, dtype=object) / target_x**2
+        xmin, xmax = min(gv.mean(target_x)), max(gv.mean(target_x))
+        xgrid = np.unique(np.r_[
+            np.linspace(xmin, xmax, 240),
+            target.match_low, target.match_high,
+            target.match_low + .05*(target.match_high-target.match_low),
+        ])
+        join_low, join_high = float(target.match_low), float(target.match_high)
+        ax.axvspan(join_low, join_high, color='0.5', alpha=.055, zorder=0)
+        ax.axvline(join_low, color='0.35', ls=':', lw=1.1, zorder=1)
+        ax.axvline(join_high, color='0.35', ls='--', lw=1.1, zorder=1)
+        ax.errorbar(
+            gv.mean(target_x), gv.mean(target_ratio),
+            xerr=gv.sdev(target_x), yerr=gv.sdev(target_ratio),
+            fmt='o', ms=4, capsize=2, color='black', alpha=.70,
+            label='infinite-volume data',
+        )
+        for name, candidate_fit in variants:
+            continuity = candidate_fit.candidate.continuity
+            prediction = np.asarray(
+                betafn.fitting.hybrid.evaluate_hybrid_target(
+                    candidate_fit, bf, key, xgrid
+                ), dtype=object,
+            ) / xgrid**2
+            mean, sdev = gv.mean(prediction), gv.sdev(prediction)
+            color = continuity_colors.get(continuity, f'C{continuity % 10}')
+            ax.plot(
+                xgrid, mean, color=color,
+                ls=continuity_styles.get(continuity, '-'),
+                label=hybrid_variant_label(
+                    candidate_fit, interpolation_result, name
+                ),
+            )
+            ax.fill_between(
+                xgrid, mean-sdev, mean+sdev, color=color, alpha=.14,
+            )
+        ax.set_title(rf'$t/a^2={float(key[2]):g}$')
+        ax.set_xlabel(r'$g^2_{\rm GF}$')
+    axes.ravel()[0].set_ylabel(r'$\beta_{\rm GF}/g_{\rm GF}^4$')
+    axes.ravel()[0].legend(frameon=False, fontsize=10)
+    (family, order, strong_form, numerator, denominator, fraction,
+     match_lower, match_upper) = group_key
+    fraction_tag = (
+        'gap_8p00_7p50'
+        if strong_form in ('eq7_blend', 'eq7_hermite', 'eq7_linear')
+        else (
+            f'fitted_{match_lower:.2f}_{match_upper:.2f}'.replace('.', 'p')
+            if fraction is None else f'{fraction:.2f}'.replace('.', 'p')
+        )
+    )
+    fig.suptitle(
+        f'{OP_LABELS[operator]}: {family} order {order}, '
+        f'{strong_form} [{numerator}/{denominator}]'
+    )
+    fig.tight_layout(rect=(0, 0, 1, .94))
+    base = HYBRID_OUTPUT_ROOT / (
+        f'hybrid_candidate_interpolation_beta_over_g4_{family}_o{order}_'
+        f'{strong_form}_{numerator}_{denominator}_match_{fraction_tag}_{operator}'
+    )
+    fig.savefig(base.with_suffix('.pdf'), bbox_inches='tight')
+    fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
+    plt.show(); plt.close(fig)
+    print(
+        f'[beta/g^4 candidate plot {plot_index}/{len(candidate_plot_jobs)}] '
+        f'{base.name}', flush=True,
+    )
+
+for operator in OBSERVABLES:
+    keys = sorted(
+        [key for key in central_interpolations if key[1] == operator],
+        key=lambda key: float(key[2]),
+    )
+    selected_indices = sorted(set((0, len(keys)//2, len(keys)-1)))
+    fig, ax = plt.subplots(figsize=(8, 6))
+    colors = plt.cm.viridis(np.linspace(.12, .88, len(selected_indices)))
+    for color, selected_index in zip(colors, selected_indices):
+        key = keys[selected_index]
+        interpolation_result = central_interpolations[key]
+        reference_fit = next(iter(interpolation_result.candidate_fits.values()))
+        target = reference_fit.targets[key]
+        target_x = np.asarray(target.x, dtype=object)
+        target_ratio = np.asarray(target.y, dtype=object) / target_x**2
+        xmin, xmax = min(gv.mean(target_x)), max(gv.mean(target_x))
+        xgrid = np.unique(np.r_[
+            np.linspace(xmin, xmax, 240),
+            target.match_low, target.match_high,
+            target.match_low + .05*(target.match_high-target.match_low),
+        ])
+        predictions = {
+            name: np.asarray(
+                betafn.fitting.hybrid.evaluate_hybrid_target(
+                    fit, bf, key, xgrid
+                ), dtype=object,
+            ) / xgrid**2
+            for name, fit in interpolation_result.candidate_fits.items()
+        }
+        average = model_average_predictions(
+            predictions, interpolation_result.weights
+        )
+        ax.plot(
+            xgrid, average.mean, color=color,
+            label=rf'$t/a^2={float(key[2]):g}$',
+        )
+        sigma = np.sqrt(np.clip(np.diag(average.covariance), 0.0, None))
+        ax.fill_between(
+            xgrid, average.mean-sigma, average.mean+sigma,
+            color=color, alpha=.18,
+        )
+        ax.errorbar(
+            gv.mean(target_x), gv.mean(target_ratio),
+            xerr=gv.sdev(target_x), yerr=gv.sdev(target_ratio),
+            fmt='o', ms=4, capsize=2, color=color, alpha=.75,
+        )
+    ax.set_xlabel(r'$g^2_{\rm GF}$')
+    ax.set_ylabel(r'$\beta_{\rm GF}/g_{\rm GF}^4$')
+    ax.set_title(f'{OP_LABELS[operator]}: weak/strong BMA interpolation')
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    base = HYBRID_OUTPUT_ROOT / f'hybrid_bma_interpolation_beta_over_g4_{operator}'
+    fig.savefig(base.with_suffix('.pdf'), bbox_inches='tight')
+    fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
+    plt.show(); plt.close(fig)
+
+progress_done('candidate and model-averaged beta/g^4 interpolation plots')
+
+progress_start('continuum extrapolation of flow-time-local BMAs')
 hybrid_results = {}
 hybrid_grid = np.round(
     np.arange(G2_GRID[0], G2_GRID[1] + 0.5 * G2_GRID[2], G2_GRID[2]),
     10,
 )
 for window in WINDOWS:
-    interpolation_result = hybrid_interpolations[window]
+    interpolation_results = hybrid_interpolations[window]
     print('continuum extrapolation:', window, 'correlated')
-    hybrid_results[(window, 'correlated')] = run_hybrid_bma_window(
+    hybrid_results[(window, 'correlated')] = run_hybrid_bma_by_target(
         bf, window, FLOW, OBSERVABLES,
         weak_couplings=WEAK_COUPLINGS,
         strong_couplings=STRONG_COUPLINGS,
         g2_grid=hybrid_grid,
         candidates=HYBRID_CANDIDATES,
         cov_mode='empirical', tau0=config.tau0,
-        prefit_candidate_fits=interpolation_result.candidate_fits,
+        prefit_interpolations=interpolation_results,
+        max_workers=HYBRID_CONTINUUM_WORKERS,
         **HYBRID_PRIOR_WIDTHS,
     )
     print('continuum extrapolation:', window, 'diagonal')
-    hybrid_results[(window, 'diagonal')] = run_hybrid_bma_window(
+    hybrid_results[(window, 'diagonal')] = run_hybrid_bma_by_target(
         bf, window, FLOW, OBSERVABLES,
         weak_couplings=WEAK_COUPLINGS,
         strong_couplings=STRONG_COUPLINGS,
         g2_grid=hybrid_grid,
         candidates=HYBRID_CANDIDATES,
         cov_mode='diagonal', tau0=config.tau0,
-        prefit_candidate_fits=interpolation_result.candidate_fits,
+        prefit_interpolations=interpolation_results,
+        max_workers=HYBRID_CONTINUUM_WORKERS,
         **HYBRID_PRIOR_WIDTHS,
     )
 
-progress_done('candidate-wise continuum extrapolation')
+progress_done('continuum extrapolation of flow-time-local BMAs')
 
 progress_start('model-averaged continuum summary plots')
-central = hybrid_results[(CENTRAL_WINDOW, 'correlated')]
-
-# Final BMA continuum beta function and beta/g^4.
-for divide_by_g4, stem, ylabel in (
-    (False, 'hybrid_bma_continuum_beta_vs_g2', r'$\beta_{\rm GF}$'),
-    (True, 'hybrid_bma_continuum_beta_over_g4_vs_g2', r'$\beta_{\rm GF}/g_{\rm GF}^4$'),
-):
-    fig, ax = plt.subplots(figsize=(8, 6))
-    for operator in OBSERVABLES:
-        average = central.averages[operator]
-        x = central.model_variance_by_choice[operator]['g2']
-        y = average.prediction / x**2 if divide_by_g4 else average.prediction
-        ax.plot(x, gv.mean(y), color=OP_COLORS[operator], label=OP_LABELS[operator])
-        ax.fill_between(
-            x, gv.mean(y) - gv.sdev(y), gv.mean(y) + gv.sdev(y),
-            color=OP_COLORS[operator], alpha=.18,
+correction_label = (
+    'TLN' if config.correction in ('tln', 'tree-level-normalization')
+    else 'No TLN'
+)
+for window in WINDOWS:
+    for mode in ('correlated', 'diagonal'):
+        result = hybrid_results[(window, mode)]
+        mode_label = (
+            'Correlated continuum' if mode == 'correlated'
+            else 'Diagonal continuum'
         )
-    ax.axvline(G2_T0, color='black', ls='--', lw=1.2, label=r'$g^2_{\rm GF}(t_0)$')
-    ax.set_xlabel(r'$g^2_{\rm GF}$'); ax.set_ylabel(ylabel)
-    if divide_by_g4:
-        ax.set_ylim(-.065, -.035)
-    ax.legend(frameon=False)
-    fig.tight_layout()
-    base = HYBRID_OUTPUT_ROOT / stem
-    fig.savefig(base.with_suffix('.pdf'), bbox_inches='tight')
-    fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
-    plt.show(); plt.close(fig)
+        for divide_by_g4, stem, ylabel in (
+            (False, 'hybrid_bma_continuum_beta_vs_g2',
+             r'$\beta_{\rm GF}$'),
+            (True, 'hybrid_bma_continuum_beta_over_g4_vs_g2',
+             r'$\beta_{\rm GF}/g_{\rm GF}^4$'),
+        ):
+            fig, ax = plt.subplots(figsize=(8, 6))
+            for operator in OBSERVABLES:
+                average = result.averages[operator]
+                x = result.model_variance_by_choice[operator]['g2']
+                y = average.prediction / x**2 if divide_by_g4 else average.prediction
+                order = np.argsort(x)
+                x, y = x[order], y[order]
+                ax.plot(
+                    x, gv.mean(y), color=OP_COLORS[operator], lw=1.8,
+                    label=OP_LABELS[operator], zorder=3,
+                )
+                ax.fill_between(
+                    x, gv.mean(y)-gv.sdev(y), gv.mean(y)+gv.sdev(y),
+                    color=OP_COLORS[operator], alpha=.18, linewidth=0,
+                    zorder=2,
+                )
+            plot_xmax = max(G2_GRID[1], G2_T0) + .25
+            xp = np.linspace(.001, plot_xmax, 900)
+            for loops, linestyle, label in (
+                (1, '-', '1-loop universal'),
+                (2, '--', '2-loop universal'),
+                (3, '-.', '3-loop gradient flow'),
+            ):
+                perturbative_ratio = pt_over_g4(xp, loops)
+                perturbative_curve = (
+                    perturbative_ratio if divide_by_g4
+                    else xp**2 * perturbative_ratio
+                )
+                ax.plot(
+                    xp, perturbative_curve, color='gray', ls=linestyle,
+                    lw=1.5, label=label, zorder=1,
+                )
+            ax.text(
+                .50, .52, 'Preliminary', transform=ax.transAxes,
+                fontsize=42, color='gray', alpha=.25, ha='center',
+                va='center', rotation=30, zorder=20, clip_on=True,
+            )
+            ax.text(
+                .58, .15,
+                'hybridBMA\n' + mode_label + '\n'
+                + rf'$t/a^2\in[{window[0]:g},{window[1]:g}]$'
+                + '\n' + correction_label + '\n' + ylabel,
+                transform=ax.transAxes, fontsize=10.5, color='gray',
+                alpha=.82, ha='center', va='center',
+                fontweight='bold', zorder=20, clip_on=True,
+            )
+            if not divide_by_g4:
+                ax.axvline(
+                    G2_T0, color='black', ls=':', lw=1.5,
+                    label=(
+                        rf'$g^2_{{\mathrm{{GF}}}}(t_0)'
+                        rf'=\frac{{8}}{{5}}\pi^2={G2_T0:.9f}$'
+                    ), zorder=1,
+                )
+                ax.set_ylim(-13.0, .5)
+            else:
+                ax.set_ylim(-.065, -.035)
+            ax.set(xlim=(0, plot_xmax), xlabel=r'$g^2_{\rm GF}$', ylabel=ylabel)
+            ax.legend(ncol=2, frameon=False, fontsize=10)
+            if window == CENTRAL_WINDOW and mode == 'correlated':
+                central_base = HYBRID_OUTPUT_ROOT / stem
+                fig.savefig(central_base.with_suffix('.pdf'), bbox_inches='tight')
+                fig.savefig(
+                    central_base.with_suffix('.png'), dpi=300,
+                    bbox_inches='tight',
+                )
+            save_figure(fig, window, stem, mode)
 
 progress_done('model-averaged continuum summary plots')
 
@@ -1576,16 +1934,15 @@ progress_done('hybrid beta-function error budget')
 progress_start('generalized continuum goodness of fit')
 gof_rows = []
 for (window, mode), result in hybrid_results.items():
-    for model, by_operator in result.continuum_quality.items():
-        for operator, entries in by_operator.items():
-            for g2, entry in zip(result.g2, entries):
-                if entry is None:
-                    continue
-                gof_rows.append({
-                    'window': window_tag(window), 'mode': mode,
-                    'model': model, 'model_weight': result.weights[model],
-                    'operator': operator, 'g2': float(g2), **entry,
-                })
+    for operator in OBSERVABLES:
+        for g2, entry in zip(result.g2, result.continuum_quality[operator]):
+            if entry is None:
+                continue
+            gof_rows.append({
+                'window': window_tag(window), 'mode': mode,
+                'interpolation': 'flow_time_local_bma',
+                'operator': operator, 'g2': float(g2), **entry,
+            })
 hybrid_continuum_gof = pd.DataFrame(gof_rows)
 hybrid_continuum_gof.to_csv(
     HYBRID_OUTPUT_ROOT / 'hybrid_continuum_generalized_gof.csv', index=False
@@ -1595,67 +1952,97 @@ print(hybrid_continuum_gof.head())
 progress_done('generalized continuum goodness of fit')
 
 progress_start('continuum extrapolation diagnostic plots')
-central = hybrid_results[(CENTRAL_WINDOW, 'correlated')]
-targets_to_plot = tuple(g for g in TARGET_G2 if central.g2[0] <= g <= central.g2[-1])
-fig, axes = plt.subplots(2, 4, figsize=(18, 9), squeeze=False)
-for ax, requested_g2 in zip(axes.ravel(), targets_to_plot):
-    grid_index = int(np.argmin(np.abs(central.g2 - requested_g2)))
-    g2 = float(central.g2[grid_index])
-    for operator in OBSERVABLES:
-        candidate_lines = {}
-        candidate_points = {}
-        xline = None
-        for name, candidate_fit in central.candidate_fits.items():
-            params = central.continuum_parameters[name][operator][grid_index]
-            if params is None:
-                continue
-            keys = sorted(
-                [key for key in candidate_fit.targets
-                 if key[0] == FLOW and key[1] == operator
-                 and CENTRAL_WINDOW[0] <= float(key[2]) <= CENTRAL_WINDOW[1]
-                 and min(gv.mean(candidate_fit.targets[key].x)) <= g2
-                 <= max(gv.mean(candidate_fit.targets[key].x))],
-                key=lambda key: float(key[2]),
+correction_label = (
+    'TLN' if config.correction in ('tln', 'tree-level-normalization')
+    else 'No TLN'
+)
+for window in WINDOWS:
+    for mode in ('correlated', 'diagonal'):
+        result = hybrid_results[(window, mode)]
+        mode_label = (
+            'Correlated continuum' if mode == 'correlated'
+            else 'Diagonal continuum'
+        )
+        targets_to_plot = tuple(
+            g for g in TARGET_G2 if result.g2[0] <= g <= result.g2[-1]
+        )
+        for divide_by_g4, stem, ylabel in (
+            (False, 'hybrid_bma_continuum_a2_over_t_beta',
+             r'$\beta_{\rm GF}$'),
+            (True, 'hybrid_bma_continuum_a2_over_t_beta_over_g4',
+             r'$\beta_{\rm GF}/g_{\rm GF}^4$'),
+        ):
+            fig, axes = plt.subplots(2, 4, figsize=(18, 9), squeeze=False)
+            for ax, requested_g2 in zip(axes.ravel(), targets_to_plot):
+                panel_g2 = None
+                for operator in OBSERVABLES:
+                    grid_index = int(np.argmin(
+                        np.abs(result.g2-requested_g2)
+                    ))
+                    g2 = float(result.g2[grid_index])
+                    params = result.continuum_parameters[operator][grid_index]
+                    points = result.continuum_points[operator][grid_index]
+                    if params is None or points is None:
+                        continue
+                    panel_g2 = g2
+                    normalization = g2**2 if divide_by_g4 else 1.0
+                    xdata = points['x']
+                    ydata = points['y'] / normalization
+                    xline = np.linspace(0.0, 1.05*max(xdata), 200)
+                    line = (
+                        params['beta'][0] + params['slope'][0]*xline
+                    ) / normalization
+                    ax.plot(
+                        xline, gv.mean(line), color=OP_COLORS[operator],
+                        lw=1.5, zorder=2,
+                    )
+                    ax.fill_between(
+                        xline, gv.mean(line)-gv.sdev(line),
+                        gv.mean(line)+gv.sdev(line),
+                        color=OP_COLORS[operator], alpha=.15, zorder=1,
+                    )
+                    ax.errorbar(
+                        xdata, gv.mean(ydata), yerr=gv.sdev(ydata),
+                        fmt='o', ms=5, capsize=3,
+                        color=OP_COLORS[operator],
+                        markerfacecolor=OP_COLORS[operator],
+                        markeredgecolor=OP_COLORS[operator],
+                        label=OP_LABELS[operator], zorder=4,
+                    )
+                if panel_g2 is not None:
+                    ax.text(
+                        .04, .94, rf'$g^2_{{\rm GF}}={panel_g2:g}$',
+                        transform=ax.transAxes, ha='left', va='top',
+                        fontsize=13, zorder=20,
+                    )
+                ax.set_xlabel(r'$a^2/t$')
+            for ax in axes.ravel()[len(targets_to_plot):]:
+                ax.set_visible(False)
+            axes.ravel()[0].legend(frameon=False, fontsize=11)
+            fig.supylabel(ylabel)
+            fig.text(
+                .50, .52, 'Preliminary', fontsize=58, color='gray',
+                alpha=.18, ha='center', va='center', rotation=30,
+                zorder=100,
             )
-            measured = np.asarray([float(key[2]) for key in keys])
-            nominal = measured - config.tau0
-            xdata = 1.0 / nominal
-            if xline is None:
-                xline = np.linspace(0.0, 1.05 * max(xdata), 200)
-            candidate_lines[name] = params['beta'][0] + params['slope'][0] * xline
-            candidate_points[name] = np.asarray([
-                (tn / tm) * np.asarray(
-                    betafn.fitting.hybrid.evaluate_hybrid_target(
-                        candidate_fit, bf, key, g2
-                    ), dtype=object,
-                ).item()
-                for key, tm, tn in zip(keys, measured, nominal)
-            ], dtype=object)
-        if set(candidate_lines) != set(central.weights):
-            continue
-        line_average = model_average_predictions(candidate_lines, central.weights)
-        point_average = model_average_predictions(candidate_points, central.weights)
-        ax.plot(xline, line_average.mean, color=OP_COLORS[operator], lw=1.5)
-        line_sigma = np.sqrt(np.clip(np.diag(line_average.covariance), 0.0, None))
-        ax.fill_between(
-            xline, line_average.mean-line_sigma, line_average.mean+line_sigma,
-            color=OP_COLORS[operator], alpha=.16,
-        )
-        ax.errorbar(
-            xdata, point_average.mean,
-            yerr=np.sqrt(np.clip(np.diag(point_average.covariance), 0.0, None)),
-            fmt='o', ms=4, capsize=2, color=OP_COLORS[operator],
-            label=OP_LABELS[operator],
-        )
-    ax.text(.04, .94, rf'$g^2_{{\rm GF}}={g2:g}$', transform=ax.transAxes, va='top')
-    ax.set_xlabel(r'$a^2/t$')
-axes.ravel()[0].legend(frameon=False)
-fig.supylabel(r'$\beta_{\rm GF}$')
-fig.tight_layout()
-base = HYBRID_OUTPUT_ROOT / 'hybrid_bma_continuum_a2_over_t_beta'
-fig.savefig(base.with_suffix('.pdf'), bbox_inches='tight')
-fig.savefig(base.with_suffix('.png'), dpi=300, bbox_inches='tight')
-plt.show(); plt.close(fig)
+            fig.text(
+                .50, .025,
+                'hybridBMA; ' + mode_label + '; '
+                + rf'$t/a^2\in[{window[0]:g},{window[1]:g}]$'
+                + '; ' + correction_label
+                + '; filled points are included in the fit',
+                fontsize=11, color='gray', alpha=.9, ha='center',
+                va='bottom', fontweight='bold', zorder=100,
+            )
+            fig.tight_layout(rect=(.025, .075, 1, 1))
+            if window == CENTRAL_WINDOW and mode == 'correlated':
+                central_base = HYBRID_OUTPUT_ROOT / stem
+                fig.savefig(central_base.with_suffix('.pdf'), bbox_inches='tight')
+                fig.savefig(
+                    central_base.with_suffix('.png'), dpi=300,
+                    bbox_inches='tight',
+                )
+            save_figure(fig, window, stem, mode)
 
 progress_done('continuum extrapolation diagnostic plots')
 
@@ -1666,27 +2053,43 @@ from betafn.weak_coupling import constrained_smooth_match, lambda_parameter_from
 central = hybrid_results[(CENTRAL_WINDOW, 'correlated')]
 hybrid_lambda_rows = []
 for operator in OBSERVABLES:
-    lambda_by_model = {}
-    for name in central.candidate_fits:
-        raw_values = central.continuum_by_model[name][operator]
-        valid = np.asarray([value is not None for value in raw_values], dtype=bool)
-        x = central.g2[valid]
-        beta = np.asarray(raw_values, dtype=object)[valid]
-        ratio = beta / x**2
-        if x[-1] < G2_T0 - 1e-10:
-            raise RuntimeError(f'{name}, {operator}: continuum curve does not reach g^2(t0)')
-        smooth = constrained_smooth_match(
-            x, ratio, pt_over_g4,
-            match_window=(max(float(x[0]), .9), 1.2),
-            correction_powers=(3, 4),
+    continuum_average = central.averages[operator]
+    x = central.model_variance_by_choice[operator]['g2']
+    beta = continuum_average.prediction
+    if x[-1] < G2_T0 - 1e-10:
+        raise RuntimeError(
+            f'{operator}: continuum curve does not reach g^2(t0)'
         )
-        estimate = lambda_parameter_from_smooth_beta(
-            x, ratio, smooth, bf.perturbative_beta_function,
-            reference_g2=G2_T0,
-        )
-        lambda_by_model[name] = np.asarray([estimate['lambda_gf_over_mu']], dtype=object)
-    lambda_average = model_average_predictions(lambda_by_model, central.weights)
-    lambda_gf = lambda_average.prediction[0]
+    ratio = beta / x**2
+    smooth = constrained_smooth_match(
+        x, ratio, pt_over_g4,
+        match_window=(max(float(x[0]), .9), 1.2),
+        correction_powers=(3, 4),
+    )
+    estimate = lambda_parameter_from_smooth_beta(
+        x, ratio, smooth, bf.perturbative_beta_function,
+        reference_g2=G2_T0,
+    )
+    lambda_gf = estimate['lambda_gf_over_mu']
+
+    within_beta = np.asarray(gv.gvar(
+        continuum_average.mean,
+        continuum_average.within_covariance,
+    ), dtype=object)
+    within_smooth = constrained_smooth_match(
+        x, within_beta / x**2, pt_over_g4,
+        match_window=(max(float(x[0]), .9), 1.2),
+        correction_powers=(3, 4),
+    )
+    within_estimate = lambda_parameter_from_smooth_beta(
+        x, within_beta / x**2, within_smooth,
+        bf.perturbative_beta_function, reference_g2=G2_T0,
+    )['lambda_gf_over_mu']
+    within_lambda_variance = float(gv.sdev(within_estimate) ** 2)
+    total_lambda_variance = float(gv.sdev(lambda_gf) ** 2)
+    between_lambda_variance = max(
+        total_lambda_variance - within_lambda_variance, 0.0
+    )
     report = {
         'lambda_gf_over_mu': {
             'central': float(gv.mean(lambda_gf)),
@@ -1708,8 +2111,8 @@ for operator in OBSERVABLES:
         'sqrt8t0_lambda_GF_central': values['central'],
         'sqrt8t0_lambda_GF_low': min(values['plus_sigma'], values['minus_sigma']),
         'sqrt8t0_lambda_GF_high': max(values['plus_sigma'], values['minus_sigma']),
-        'within_model_variance': float(lambda_average.within_covariance[0, 0]),
-        'between_model_variance': float(lambda_average.between_covariance[0, 0]),
+        'within_model_variance': within_lambda_variance,
+        'between_model_variance': between_lambda_variance,
     })
 
 hybrid_lambda_table = pd.DataFrame(hybrid_lambda_rows)
@@ -1745,7 +2148,7 @@ if RUN_HYBRID_THINNING:
         for window in WINDOWS:
             key = (float(spacing), window)
             print('hybrid thinning:', spacing, window)
-            hybrid_thinning_results[key] = run_hybrid_bma_window(
+            hybrid_thinning_results[key] = run_hybrid_bma_by_target(
                 bf, window, FLOW, OBSERVABLES,
                 weak_couplings=WEAK_COUPLINGS,
                 strong_couplings=STRONG_COUPLINGS,
@@ -1763,7 +2166,8 @@ if RUN_HYBRID_THINNING:
             )
     thinning_rows = []
     for (spacing, window), result in hybrid_thinning_results.items():
-        for operator, average in result.averages.items():
+        for operator in OBSERVABLES:
+            average = result.averages[operator]
             x = result.model_variance_by_choice[operator]['g2']
             for g2, mean, variance in zip(x, average.mean, np.diag(average.covariance)):
                 thinning_rows.append({
@@ -1786,15 +2190,20 @@ required_outputs = (
     'hybrid_model_evidence.csv',
     'hybrid_fitted_coefficients.csv',
     'hybrid_fitted_coefficients.txt',
+    'hybrid_gap_diagnostics.csv',
     'hybrid_model_weights.pdf',
     'hybrid_bma_interpolation_p.pdf',
     'hybrid_bma_interpolation_c.pdf',
     'hybrid_bma_interpolation_s.pdf',
+    'hybrid_bma_interpolation_beta_over_g4_p.pdf',
+    'hybrid_bma_interpolation_beta_over_g4_c.pdf',
+    'hybrid_bma_interpolation_beta_over_g4_s.pdf',
     'hybrid_bma_continuum_beta_vs_g2.pdf',
     'hybrid_bma_continuum_beta_over_g4_vs_g2.pdf',
     'hybrid_beta_error_budget.csv',
     'hybrid_continuum_generalized_gof.csv',
     'hybrid_bma_continuum_a2_over_t_beta.pdf',
+    'hybrid_bma_continuum_a2_over_t_beta_over_g4.pdf',
     'hybrid_bma_lambda_blinded.csv',
     'hybrid_bma_lambda_blinded.pdf',
 )
@@ -1802,27 +2211,43 @@ missing_outputs = [
     name for name in required_outputs
     if not (HYBRID_OUTPUT_ROOT / name).is_file()
 ]
-for group_key in candidate_groups:
-    (family, order, numerator, denominator, fraction,
+for group_key in candidate_group_keys:
+    (family, order, strong_form, numerator, denominator, fraction,
      match_lower, match_upper) = group_key
     fraction_tag = (
-        (f'fitted_{match_lower:.2f}_{match_upper:.2f}'.replace('.', 'p'))
-        if fraction is None
-        else f'{fraction:.2f}'.replace('.', 'p')
+        'gap_8p00_7p50'
+        if strong_form in ('eq7_blend', 'eq7_hermite', 'eq7_linear')
+        else (
+            f'fitted_{match_lower:.2f}_{match_upper:.2f}'.replace('.', 'p')
+            if fraction is None else f'{fraction:.2f}'.replace('.', 'p')
+        )
     )
     for operator in OBSERVABLES:
-        name = (
-            f'hybrid_candidate_interpolation_{family}_o{order}_'
-            f'pade_{numerator}_{denominator}_match_{fraction_tag}_{operator}.pdf'
-        )
-        if not (HYBRID_OUTPUT_ROOT / name).is_file():
-            missing_outputs.append(name)
+        for quantity_tag in ('', 'beta_over_g4_'):
+            name = (
+                f'hybrid_candidate_interpolation_{quantity_tag}{family}_o{order}_'
+                f'{strong_form}_{numerator}_{denominator}_match_{fraction_tag}_'
+                f'{operator}.pdf'
+            )
+            if not (HYBRID_OUTPUT_ROOT / name).is_file():
+                missing_outputs.append(name)
 if missing_outputs:
     raise RuntimeError(f'missing required hybrid outputs: {missing_outputs}')
 
 completion_payload = {
     'analysis_id': ANALYSIS_ID,
     'candidate_count': len(HYBRID_CANDIDATES),
+    'interpolation_target_count': len(
+        hybrid_interpolations[CENTRAL_WINDOW]
+    ),
+    'interpolation_fit_count': (
+        len(hybrid_interpolations[CENTRAL_WINDOW])
+        * len(HYBRID_CANDIDATES)
+    ),
+    'interpolation_treatment': 'independent_by_operator_and_flow_time',
+    'cross_flow_time_covariance': 'linear_response_to_shared_gvar_data',
+    'hybrid_workers': HYBRID_MAX_WORKERS,
+    'hybrid_continuum_workers': HYBRID_CONTINUUM_WORKERS,
     'evidence_rows': int(len(hybrid_evidence)),
     'coefficient_rows': int(len(hybrid_coefficient_table)),
     'candidate_interpolation_plots': int(len(candidate_plot_jobs)),

@@ -30,12 +30,18 @@ from .fitting.families import polynomial_interpolation, perturbative_interpolati
 from .fitting.goodness import GeneralizedChiSquare, bruno_sommer_goodness_of_fit
 from .fitting.hybrid import (
     HybridInterpolationCandidate,
+    HybridIndependentWindowResult,
     HybridInterpolationResult,
+    HybridTargetAverage,
     HybridWindowResult,
     default_hybrid_candidates,
+    fit_hybrid_bma_by_operator,
+    fit_hybrid_bma_by_target,
     fit_hybrid_bma_candidates,
     hybrid_match_fraction,
     hybrid_parameter_records,
+    run_hybrid_bma_by_operator,
+    run_hybrid_bma_by_target,
     run_hybrid_bma_window,
 )
 from .fitting.model_average import (
@@ -70,8 +76,12 @@ __all__ = [
     "polynomial_interpolation", "perturbative_interpolation",
     "GeneralizedChiSquare", "bruno_sommer_goodness_of_fit",
     "HybridInterpolationCandidate", "HybridInterpolationResult", "HybridWindowResult",
-    "default_hybrid_candidates", "fit_hybrid_bma_candidates", "hybrid_match_fraction",
-    "hybrid_parameter_records",
+    "HybridTargetAverage", "HybridIndependentWindowResult",
+    "default_hybrid_candidates", "fit_hybrid_bma_by_operator",
+    "fit_hybrid_bma_by_target",
+    "fit_hybrid_bma_candidates", "hybrid_match_fraction",
+    "hybrid_parameter_records", "run_hybrid_bma_by_operator",
+    "run_hybrid_bma_by_target",
     "run_hybrid_bma_window",
     "ModelAverageResult", "model_average_predictions", "posterior_model_weights",
     "relative_partial_uncertainty_percent", "shapley_model_variance",

@@ -4,12 +4,18 @@ from .families import polynomial_interpolation, perturbative_interpolation
 from .goodness import GeneralizedChiSquare, bruno_sommer_goodness_of_fit
 from .hybrid import (
     HybridInterpolationCandidate,
+    HybridIndependentWindowResult,
     HybridInterpolationResult,
+    HybridTargetAverage,
     HybridWindowResult,
     default_hybrid_candidates,
+    fit_hybrid_bma_by_operator,
+    fit_hybrid_bma_by_target,
     fit_hybrid_bma_candidates,
     hybrid_match_fraction,
     hybrid_parameter_records,
+    run_hybrid_bma_by_operator,
+    run_hybrid_bma_by_target,
     run_hybrid_bma_window,
 )
 from .model_average import (

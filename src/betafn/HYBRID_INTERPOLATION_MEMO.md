@@ -1,5 +1,125 @@
 # Hybrid weak/strong interpolation and model averaging
 
+## Current weak-ansatz revision — 2026-10-27
+
+The user reran the C1 bridge and requested a rethinking of the ansatz itself.
+The regenerated beta/g^4 plots still had a large hump, and the median
+augmented chi2/dof was about 3.9 for all four old candidates. The old gap
+diagnostics also exposed incompatible endpoint slopes. Merely improving
+join differentiability was not sufficient.
+
+The hybrid notebook and batch runner now select `monotone` and
+`monotone_constant`, each with N=6, 7, and 8, combined with the Eq. (7)
+[1/2], [2/3], and [3/4] strong forms:
+
+    W(x) = a0 - 2*b0*integral_0^x s sum_k w_k B_{k,N}(s/L) ds
+    L = 4*pi, w0 = 1, w_k = exp(q_k), q_k ~ N(0,1.5^2).
+
+Here b0=0.0527714498137..., B are Bernstein polynomials, and a0 is zero
+for `monotone` or has the unchanged N(0,0.25^2) prior for
+`monotone_constant`. `weak_width` is the standard deviation of q for these
+families; stored coefficient keys are `logw_0_k`. There are N slope-shape
+parameters, and W is a polynomial of degree N+2. It has the one-loop anchor
+W=a0-b0*x^2+O(x^3), but does not inherit the spurious three-loop zero.
+Its slope is strictly negative on 0<x<=L. This shape restriction is an
+explicit model assumption motivated by the plotted finite-time data; it is
+not a universal statement about all beta functions. In particular it does
+not itself impose monotonicity of beta/x^2.
+
+The positive-coefficient Bernstein representation follows the general
+shape-restricted polynomial strategy discussed by Wang and Ghosh (2012):
+https://www.sciencedirect.com/science/article/pii/S0167947312001004
+The specific anchored derivative and priors above are our analysis choices,
+not a formula claimed to be in that paper. The integral is evaluated exactly
+as finite Bernstein sums, including analytic first/second derivatives; there
+is no numerical quadrature inside the fitter. A preflight check rejects
+weak data/join geometry outside the declared basis interval.
+
+The C1 gap-only bridge and the independent Equation-7 strong likelihood remain.
+The established `fit4`--`fit11` weak definitions remain selectable and
+unchanged. The notebook configuration lists Fits 5--10 as commented examples,
+so experimenting with one requires only uncommenting its family/order entry.
+All families use proper Gaussian coefficient priors in the hybrid analysis,
+because evidence is undefined for improper prior-free parameters. Reproducing
+the earlier Fit4/Fit11 prior specification requires `weak_width=5`, not the
+current log-weight width. No global fit over flow times or operators is used.
+
+The current output root/analysis identifier stays stable. New families have distinct
+checkpoint names, so their interpolation must be fitted anew. Old Fit4/Fit11
+checkpoints are never reused for the new likelihood. The notebook's stale
+downstream displays were cleared; upstream displays and existing result
+files were retained. Rerun configuration, then the independent interpolation
+section and its interpolation/quality plot cells; inspect fit quality before
+continuum.
+
+Validation includes analytic integral versus quadrature, analytic derivatives,
+strictly negative weak slopes, absence of the inherited PT3 zero, correlated
+gvar matching between the optimized and reference evaluators, C1 joins for
+both beta and beta/x^2, and a 15-point synthetic errors-in-variables fit
+through the production fitter and checkpoint restoration. This is code and
+synthetic validation, not evidence of an acceptable fit to the actual data;
+the full notebook interpolation has deliberately not been run by the agent.
+
+## Earlier joining correction — 2026-10-27 (historical)
+
+The hybrid notebook introduced `eq7_linear`, `continuity=1`. The internal
+form name and the analysis/output root are retained for compatibility. This
+mode means a **gap-only C1 rational Hermite bridge**, not an exactly linear
+segment. The older descriptions below document historical alternatives.
+
+Inspection of the saved beta and beta/g^4 candidate plots found that the C2
+shoulders changed the curve between the measured beta_b=8.5 and 8 points.
+The labelled-data likelihood still used the original weak polynomial there.
+That plotting/prediction inconsistency is removed from the notebook's selected
+mode: the exact weak branch is now used through x_8 plus 5% of the gap to
+x_7.5, and the exact strong branch is used from x_7.5 onward. Both endpoint
+values and slopes are joined only inside the unmeasured interval.
+
+The numerical bridge is Delbourgo--Gregory's rational cubic Hermite formula,
+TR/10/83, Eqs. (2.3)--(2.7):
+https://bura.brunel.ac.uk/bitstream/2438/2200/1/TR_10_83.pdf
+For secant D and endpoint derivatives d0,d1, the chosen tension is
+r=3+(d0/D-1)^2+(d1/D-1)^2. It is >=3 and >=(d0+d1)/D. Hence the sufficient
+monotonicity condition in their Eq. (3.8) holds when both slopes agree in
+sign with D. A nearly zero central secant uses ordinary Hermite, without a
+monotonicity guarantee. Opposite-sign slopes are retained and reported in
+`hybrid_gap_diagnostics.csv`: clipping them would break differentiability.
+This prescription is distinct from the physics paper's Eq. (7), which
+motivates the strong branch. The positive ordered-pole parameterization is
+a restriction of that paper's general denominator. Neither the 5% extension
+nor the bridge is claimed to be fitted or statistically preferred by the
+data in the empty gap.
+
+All endpoint coefficient correlations, including the tension dependence, are
+propagated using gvar. Geometry remains conditional on measured endpoint
+means, as previously. Gap modelling and endpoint-location systematics are
+not automatically part of the statistical band. Existing C0/C2 coefficient
+checkpoints can be reused for C1 only when their data, covariance, prior and
+candidate signatures match: these modes have identical likelihoods. Curves
+and all subsequent continuum/Lambda outputs still need regenerating.
+
+There is also an unresolved fit-quality issue, separate from the join:
+the saved Wilson t/a^2=6 Fit4 order4 [1/2] candidate has augmented
+chi2/dof=118.250161/15. Its c4=32.0(2.7) is far from its 0+/-5 prior, and
+its beta derivative turns positive near the weak endpoint. A smooth join
+cannot make that underlying fit adequate. Changes to orders/priors were
+proposed to the user; none were silently applied. The notebook quality plot
+now explicitly labels the statistics as augmented/nominal lsqfit values.
+In addition, the current Nf=4 GF three-loop prefactor has a positive zero
+at x=8.778622164910281 (computed from `PerturbativeBetaFunction(4,3).b`).
+Fit4 necessarily inherits that zero; extra multiplicative polynomial orders
+cannot remove it. Fit11 can shift the value through its additive constant.
+This truncated-perturbative zero is not established nonperturbative physics.
+Any weak-domain extension approaching it must be checked explicitly before
+claiming a smooth, well-fitting physical interpolation.
+
+Validation: regression tests in `fitting/test_hybrid_gap.py` check exact
+weak/strong preservation (including gvar correlations), prepared/reference
+likelihood consistency at data points, C1 joins for beta and beta/x^2,
+monotonicity for compatible extreme slopes, covariance versus a numerical
+Jacobian, and finite Eq. (7) derivatives at removable singularities. No
+upstream ensemble processing was run for this correction.
+
 ## Scope and compatibility
 
 The standard single-interpolation pipeline is unchanged and remains in the
@@ -20,69 +140,66 @@ noisy renormalized couplings:
 
 At each flow time and operator, the lower and upper edges of the matching gap
 are the posterior means of g_GF^2 at beta_b = 8 and 7.5.  Matching fractions
-are no longer separate discrete models.  Every candidate has one global
-matching fraction shared by all flow times and operators.  With
-
-    q_match ~ Normal(0,1),
-    f_match = 0.2 + 0.6 Phi(q_match),
-
-the induced prior is exactly Uniform(0.2,0.8).  The physical matching point
-for each target is
-
-    x_m = x_8 + f_match (x_7.5 - x_8).
-
-The interior bounds avoid a poorly conditioned attachment directly at either
-neighboring data point while allowing the data to determine the location.
+are no longer parameters or separate discrete models. The weak curve is kept
+through x_8 plus 5% of the empty gap, the independent strong curve starts at
+x_7.5, and the two endpoint values and derivatives are connected by the C1
+rational Hermite bridge described above. The 5% extension is a fixed modelling
+choice and should eventually be varied as a gap-prescription systematic.
 
 ## Candidate interpolation
 
-The weak branch is selectable between Fit 4 and Fit 11, with the allowed order
-specified separately for each family.  The current production choice uses
-order 4 for both.  With
-x = g_GF^2 and u = x/(4 pi), Fit 4 is
+The active weak branches are the anchored monotone and
+monotone-with-constant families at orders 6--8. Fits 4--11 remain optional,
+with the order specified independently for each family in the notebook's
+single model-selection dictionary. With x = g_GF^2 and u = x/(4 pi), Fit 4 is
 
     W(x) = beta_PT,3(x) [1 + sum_{k=1}^N c_k u^k],
 
-and Fit 11 adds a finite-flow constant a0.
+and Fit 11 adds a finite-flow constant a0. Fits 5--10 use exactly the same
+fixed/free coefficient conventions as the standard analysis runner.
 
-The strong branch is a Pade-style deformation,
+The independent strong branch is the paper's Eq. (7)-style ratio,
 
-    beta(x) = W(x) + x^2 z^q P_m(z) / Q_n(z),
-    z = (x - x_m) / Delta_x.
+    beta_strong(x) = -p0 x^2 P_N(u) / Q_{N+1}(u),
+    u = x/(4 pi),
 
-The default q=2 gives C1 matching.  q=3 is available for C2 sensitivity
-tests.  The current production comparison uses [2/1] and [3/2], both of which
-make the rational factor asymptotically linear in z.  Lower orders remain
-available as explicit sensitivity models.
+with p0 positive, P_N(0)=1, and the currently selected [1/2], [2/3], and
+[3/4] orders. The extra denominator power makes beta(x) asymptotically linear.
+The weak and strong fits are not statistically stitched through a shared fit
+parameter; their posterior endpoint jets are connected only in the data-free
+gap.
 
 For denominator order n,
 
-    Q_n(z) = product_{j=1}^n (1 + z/rho_j),
+    Q_n(u) = product_{j=1}^n (1 + u/rho_j),
     0 < rho_1 < rho_2 < ... < rho_n.
 
 The first scale is exponential in a fitted log parameter.  Every subsequent
 scale is the preceding scale plus an exponential positive increment.  All
-poles therefore lie at negative z and cannot enter the physical strong branch
-z >= 0.  The strict ordering removes the root-label permutation degeneracy,
+poles therefore lie at negative u and cannot enter the physical branch u >= 0.
+The strict ordering removes the root-label permutation degeneracy,
 which is essential when comparing marginal likelihoods.
 
 ## Evidence and priors
 
-Every candidate is one joint errors-in-variables fit to every selected flow
-time and all three operators in a continuum window.  The g_GF^2 values are
-latent variables carrying the complete IV covariance.  Consequently `logGBF`
-is a joint Gaussian marginal likelihood for the window.  The code does not sum
-evidences from correlated one-dimensional fits.
+Every candidate is one errors-in-variables fit to the approximately 15
+coupling points at one operator and one flow time. Its g_GF^2 values are latent
+variables carrying that target's IV covariance. Candidate `logGBF` values are
+compared only within that same target, so every operator/flow-time interpolation
+has its own posterior model probabilities. Evidences are never summed across
+flow times or operators.
 
 All coefficient priors are proper, because prior-free marginal likelihood is
 undefined.  Defaults are:
 
-- weak multiplicative coefficients: 0 +/- 5;
+- active monotone log-weights: 0 +/- 1.5;
 - Fit 11 additive constant: 0 +/- 0.25;
-- coefficients of the x^2-scaled strong correction: 0 +/- 0.10;
-- first log pole distance and each ordered log increment: 0 +/- 0.70.
-- global matching fraction: Uniform(0.2,0.8), implemented through the latent
-  standard-normal transformation above.
+- strong numerator coefficients: 0 +/- 2;
+- first log pole distance and each ordered log increment: 0 +/- 1.
+
+Optional Fits 4--10 currently inherit the selected scalar `weak_width`; a
+prior-width sensitivity study is required before comparing their evidence to
+the active monotone families.
 
 These are analysis choices, not universal constants.  Final results require a
 prior-predictive check and a preregistered width-sensitivity analysis.  All
@@ -92,45 +209,53 @@ to each varied weak family, weak order, Pade order, and matching continuity.
 
 ## Propagation and uncertainty budget
 
-The continuum limit is performed separately for every complete candidate.
-Predictions are then combined with the law of total covariance:
+Candidate predictions are combined locally, before the continuum limit, with
+the law of total covariance:
 
     Cov(Y) = E_M[Cov(Y | M)] + Cov_M(E[Y | M]).
 
 The first term is called the within-model statistical covariance and the
-second the interpolation-model systematic covariance.  The non-Gaussian model
-mixture is only moment matched for plotting and linear summaries.  Nonlinear
-Lambda integrals are evaluated candidate by candidate before averaging.
+second the interpolation-model systematic covariance. At each g_GF^2, the
+resulting local BMA predictions at different flow times are the inputs to the
+ordinary continuum extrapolation. This avoids imposing an artificial global
+model indicator across otherwise independent interpolations.
 
-Shapley variance effects divide the between-model variance among the discrete
-choices that actually vary: weak family, weak order, Pade order, and matching
-continuity.  Matching-location uncertainty is marginalized inside every
-candidate and therefore enters its within-model posterior covariance.  This
-allocation includes interactions and sums to the between-model variance.
+Shapley variance effects divide each target's between-model variance among the
+discrete choices that actually vary: weak family, weak order, and Padé order
+(plus continuity if it is deliberately varied). Those local contributions are
+propagated through the linear continuum fit.
 Reported percentages are partial relative standard uncertainties,
 100 sqrt(V_k)/|mean beta|; they do not add linearly.
 
-## Exact candidate-level parallelism and restartability
+## Exact target/candidate parallelism and restartability
 
-Candidate models are conditionally independent calculations using the same
-joint data vector.  The implementation evaluates them in separate processes
-and never divides a candidate by operator, flow time, or coupling.  Before
-workers start, the parent constructs one joint vector containing every latent
-g_GF^2 value and beta value and extracts its full mean and covariance.  Each
-worker reconstructs that exact joint Gaussian object, uses the unchanged
-errors-in-variables likelihood and proper priors, and returns its coefficient
-posterior with `gvar.dumps`, which preserves the complete within-model
-covariance.  Model weights remain normalized from the same `logGBF` values.
+Target/candidate fits are independent calculations. A target is exactly one
+operator and one flow time and contains the weak and strong coupling points
+needed by the two-branch interpolation. The implementation evaluates these
+tasks in separate processes and never divides a target by coupling. Before
+workers start, the parent constructs one x/y mean-and-covariance object per
+target. Each worker uses the unchanged errors-in-variables likelihood and
+proper priors and returns its coefficient posterior with `gvar.dumps`. Model
+weights are normalized separately from the candidate `logGBF` values of each
+target.
 
-Every completed candidate is written atomically to a signature-checked
-checkpoint.  The signature contains the full data mean and covariance,
+Parallel serialization does not discard correlations between flow times. Each
+worker also returns the fitted parameters' linear response to its local x/y
+data. The parent reconstructs those parameters from the original shared gvar
+data and an independent residual covariance. Local BMA model indicators remain
+independent, while covariance induced by common Monte Carlo fluctuations is
+averaged over both targets' model probabilities and retained in the correlated
+continuum fit.
+
+Every completed target/candidate pair is written atomically to a
+signature-checked checkpoint. The signature contains the target data mean and covariance,
 target geometry, perturbative coefficients, candidate definition, and prior
 widths, so a checkpoint cannot be reused after a scientifically relevant
-input changes.  Results are restored in the configured candidate order,
-independent of process completion order.  Workers restrict internal BLAS and
-OpenMP pools to one thread; SLURM parallelism is therefore across candidate
-models without CPU oversubscription.  Adding models only extends the worker
-queue and does not require changing the scheduling logic.
+input changes. Results are restored in target and configured candidate order,
+independent of process completion order. Workers restrict internal BLAS and
+OpenMP pools to one thread; SLURM parallelism is therefore across
+operator/flow-time/model tasks without CPU oversubscription. Adding models or
+flow times only extends the worker queue.
 
 The notebook and batch runner also produce candidate-level interpolation
 diagnostics without changing any fit.  Each weak-family/order, Pade-order,
@@ -139,7 +264,7 @@ and C2 matching variants are overlaid in that figure.  Separate plots retain
 the model-averaged curve.  `hybrid_fitted_coefficients.csv` is the
 machine-readable coefficient ledger and `hybrid_fitted_coefficients.txt` is
 the corresponding grouped text table.  Both include coefficient means and
-standard deviations, joint log evidence, and posterior model probability.
+standard deviations, target-local log evidence, and posterior model probability.
 
 Progress reporting is diagnostic only.  Processing, chiral and
 infinite-volume stages use the existing verbosity machinery; hybrid

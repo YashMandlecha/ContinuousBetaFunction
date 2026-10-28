@@ -1,6 +1,11 @@
 """ChiralMixin — chiral extrapolation stage of the BetaFunction analysis."""
 from __future__ import annotations
 
+from types import SimpleNamespace as _SimpleNamespace
+
+import gvar as _gvar
+import numpy as _np
+from scipy.special import gammaincc as _gammaincc
 from tqdm import tqdm as _tqdm
 
 from ..base.exceptions import BetaFunctionException
@@ -9,6 +14,58 @@ from ..fitting.containers import FitInput
 
 class ChiralMixin:
     """Chiral extrapolation to m=0 at fixed bare coupling, volume, and flow time."""
+
+    @staticmethod
+    def _linear_chiral_fit(data: FitInput):
+        """Solve the default two-parameter chiral fit by correlated GLS.
+
+        The default chiral ansatz is exactly linear in both parameters,
+        ``y(m) = k1 + k2*m``.  Solving its normal equations directly avoids
+        sending thousands of these tiny linear problems through a nonlinear
+        optimizer.  Forming the fitted parameters as linear combinations of
+        the original gvars preserves their correlations with every later
+        analysis stage.
+        """
+        x = _np.asarray(_gvar.mean(data.x), dtype=float)
+        y = _np.asarray(data.y, dtype=object)
+        y_mean = _np.asarray(_gvar.mean(y), dtype=float)
+        covariance = _np.asarray(_gvar.evalcov(y), dtype=float)
+
+        if x.ndim != 1 or y_mean.ndim != 1 or x.size != y_mean.size:
+            raise ValueError("chiral fit inputs must be one-dimensional and equally sized")
+        if x.size < 2:
+            raise ValueError("chiral fit requires at least two mass points")
+        if not (_np.all(_np.isfinite(x)) and _np.all(_np.isfinite(y_mean))
+                and _np.all(_np.isfinite(covariance))):
+            raise ValueError("chiral fit inputs contain non-finite values")
+
+        covariance = 0.5 * (covariance + covariance.T)
+        weight = _np.linalg.pinv(covariance, hermitian=True)
+        design = _np.column_stack((_np.ones_like(x), x))
+        normal = design.T @ weight @ design
+        if _np.linalg.matrix_rank(normal) < 2:
+            raise ValueError("chiral fit normal matrix is rank deficient")
+
+        projector = _np.linalg.solve(normal, design.T @ weight)
+        parameters = _np.asarray([
+            sum(projector[row, column] * y[column] for column in range(y.size))
+            for row in range(2)
+        ], dtype=object)
+
+        residual = y_mean - design @ _np.asarray(_gvar.mean(parameters), dtype=float)
+        chi2 = float(residual @ weight @ residual)
+        dof = max(int(x.size - 2), 0)
+        quality = float(_gammaincc(0.5 * dof, 0.5 * chi2)) if dof > 0 else 1.0
+        return _SimpleNamespace(
+            p={
+                "k1(t;beta,L)": _np.asarray([parameters[0]], dtype=object),
+                "k2(t;beta,L)": _np.asarray([parameters[1]], dtype=object),
+            },
+            chi2=chi2,
+            dof=dof,
+            Q=quality,
+            logGBF=None,
+        )
 
     def _gather_ch_info(self, coupling: str, volume: str, xtrp: list[str], mnt: float, mxt: float):
         masses = [mass for mass in self.avg_data[coupling][volume] if mass != "0p00"]
@@ -120,7 +177,12 @@ class ChiralMixin:
                         data = self.get_ch_data(coupling, volume, flow, x, obs, flow_time, masses)
                         if data.point_count < 2:
                             continue
-                        fit = self.chiral.model.fit(self._run_fit, self._run_fit_with_x_errors, data)
+                        if fcn is None and prior is None and p0 is None:
+                            fit = self._linear_chiral_fit(data)
+                        else:
+                            fit = self.chiral.model.fit(
+                                self._run_fit, self._run_fit_with_x_errors, data
+                            )
                         self.chiral.record_fit(
                             (coupling, volume, x, flow, obs, flow_time),
                             fit.p,
